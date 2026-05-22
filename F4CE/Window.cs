@@ -1,7 +1,6 @@
 ﻿using F4CE.Backends;
 using F4CE.Objects;
 using ImGuiNET;
-using NAudio.Wave;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
@@ -13,7 +12,7 @@ using System.Runtime.InteropServices;
 
 namespace F4CE;
 
-class Window : GameWindow
+internal class Window : GameWindow
 {
 	public Window() : base(GameWindowSettings.Default, new NativeWindowSettings() { ClientSize = new OpenTK.Mathematics.Vector2i(1280, 960), APIVersion = new Version(3, 3) })
 	{ }
@@ -77,54 +76,59 @@ class Window : GameWindow
 		SwapBuffers();
 	}
 
-	private readonly OAudioPlayback GenericPlayback = new();
+	private readonly List<OAudioPlayback> StoredPlaybacks = new();
+	private OAudioPlayback CurrentPlayback = null;
 
 	private void DrawMainImgui()
 	{
 		ImGui.Begin("main");
 
-		if (!GenericPlayback.IsRecording)
+		CurrentPlayback ??= new OAudioPlayback();
+
+		if (!CurrentPlayback.IsRecording)
 		{
 			if (ImGui.Button("Start Recording", new Vector2(160, 40)))
 			{
-				GenericPlayback.StartRecording();
+				CurrentPlayback.StartRecording();
 			}
 		}
 		else
 		{
 			if (ImGui.Button("Stop Recording", new Vector2(160, 40)))
 			{
-				GenericPlayback.StopRecording();
+				CurrentPlayback.StopRecording();
+				StoredPlaybacks.Add(CurrentPlayback);
+				CurrentPlayback = null;
 			}
 		}
 
-		ImGui.SameLine();
+		ImGui.NewLine();
+		ImGui.NewLine();
 
-		bool PlaybackDisabled = GenericPlayback.IsRecording;
-
-		if (PlaybackDisabled)
+		int Count = 0;
+		foreach (var Playback in StoredPlaybacks)
 		{
-			ImGui.BeginDisabled();
-		}
-
-		if (!GenericPlayback.IsPlaying)
-		{
-			if (ImGui.Button("Play Recording", new Vector2(160, 40)))
+			if (!Playback.IsPlaying)
 			{
-				GenericPlayback.PlayRecording();
+				if (ImGui.Button($"{Playback.Length} {Count}", new Vector2(160, 40)))
+				{
+					Playback.PlayRecording();
+				}
 			}
-		}
-		else
-		{
-			if (ImGui.Button("Stop Playback", new Vector2(160, 40)))
+			else
 			{
-				GenericPlayback.StopPlayback();
+				if (ImGui.Button($"{Playback.Length} {Count}", new Vector2(160, 40)))
+				{
+					Playback.StopPlayback();
+				}
 			}
+			++Count;
 		}
 
-		if (PlaybackDisabled)
+		if (ImGui.Button("Play All"))
 		{
-			ImGui.EndDisabled();
+			OAudioPlayback Playback = OAudioPlayback.CombinePlaybacks(StoredPlaybacks); // TODO : makea ref
+			Playback.PlayRecording();
 		}
 
 		ImGui.End();
@@ -139,8 +143,8 @@ class Window : GameWindow
 	public readonly static DebugProc DebugProcCallback = Window_DebugProc;
 	private static void Window_DebugProc(DebugSource Source, DebugType Type, int Id, DebugSeverity Severity, int Length, IntPtr PtrMessage, IntPtr PtrInt)
 	{
-		string ParsedMessage = Marshal.PtrToStringAnsi(PtrMessage, Length);
-		bool ShowMessage = true;
+		var ParsedMessage = Marshal.PtrToStringAnsi(PtrMessage, Length);
+		var ShowMessage = true;
 
 		switch (Source)
 		{
@@ -158,29 +162,31 @@ class Window : GameWindow
 				break;
 		}
 
-		if (ShowMessage)
+		if (!ShowMessage)
 		{
-			switch (Severity)
-			{
-				case DebugSeverity.DontCare:
-					Console.WriteLine($"[DontCare] [{Source}] {ParsedMessage}");
-					break;
-				case DebugSeverity.DebugSeverityHigh:
-					Console.Error.WriteLine($"Error: [{Source}] {ParsedMessage}");
-					break;
-				case DebugSeverity.DebugSeverityMedium:
-					Console.WriteLine($"Warning: [{Source}] {ParsedMessage}");
-					break;
-				case DebugSeverity.DebugSeverityLow:
-					Console.WriteLine($"Info: [{Source}] {ParsedMessage}");
-					break;
-				case DebugSeverity.DebugSeverityNotification:
-					//Console.WriteLine($"[Fuck THis] [{Source}] {ParsedMessage}");
-					break;
-				default:
-					Console.WriteLine($"[{Severity}] [{Source}] {ParsedMessage}");
-					break;
-			}
+			return;
+		}
+
+		switch (Severity)
+		{
+			case DebugSeverity.DontCare:
+				Console.WriteLine($"[DontCare] [{Source}] {ParsedMessage}");
+				break;
+			case DebugSeverity.DebugSeverityHigh:
+				Console.Error.WriteLine($"Error: [{Source}] {ParsedMessage}");
+				break;
+			case DebugSeverity.DebugSeverityMedium:
+				Console.WriteLine($"Warning: [{Source}] {ParsedMessage}");
+				break;
+			case DebugSeverity.DebugSeverityLow:
+				Console.WriteLine($"Info: [{Source}] {ParsedMessage}");
+				break;
+			case DebugSeverity.DebugSeverityNotification:
+				//Console.WriteLine($"[Fuck THis] [{Source}] {ParsedMessage}");
+				break;
+			default:
+				Console.WriteLine($"[{Severity}] [{Source}] {ParsedMessage}");
+				break;
 		}
 	}
 }
