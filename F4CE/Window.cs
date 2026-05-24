@@ -108,20 +108,26 @@ internal class Window : GameWindow
 		int Count = 0;
 		foreach (var Playback in StoredPlaybacks)
 		{
+			ImGui.SameLine();
+			float Length = Playback.Length * 0.001f;
 			if (!Playback.IsPlaying)
 			{
-				if (ImGui.Button($"{Playback.Length} {Count}", new Vector2(160, 40)))
+				if (ImGui.Button($"Track {Count}", new Vector2(Length, 40)))
 				{
 					Playback.PlayRecording();
 				}
 			}
 			else
 			{
-				if (ImGui.Button($"{Playback.Length} {Count}", new Vector2(160, 40)))
+				if (ImGui.Button($"GO {Count}", new Vector2(Length, 40)))
 				{
 					Playback.StopPlayback();
 				}
 			}
+
+			float[] Waveform = Playback.GetWaveform(1024, 3.0f);
+			DrawWaveform(Waveform, new Vector2(400, 100));
+
 			++Count;
 		}
 
@@ -138,6 +144,29 @@ internal class Window : GameWindow
 	{
 		ImguiImplOpenGL3.Shutdown();
 		ImguiImplOpenTK4.Shutdown();
+	}
+
+	private readonly Random RandomImGuiIdChrist = new();
+
+	public void DrawWaveform(float[] Samples, Vector2 Size)
+	{
+		ImDrawListPtr DrawList = ImGui.GetWindowDrawList();
+		Vector2 Pos = ImGui.GetCursorScreenPos();
+
+		ImGui.InvisibleButton($"Waveform{RandomImGuiIdChrist.NextSingle()}", Size);
+
+		float MidY = Pos.Y + Size.Y * 0.5f;
+
+		for (int Sample = 1; Sample < Samples.Length; Sample++)
+		{
+			float X1 = Pos.X + ((Sample - 1) / (float)Samples.Length) * Size.X;
+			float X2 = Pos.X + (Sample / (float)Samples.Length) * Size.X;
+
+			float Y1 = MidY - Samples[Sample - 1] * Size.Y * 0.5f;
+			float Y2 = MidY - Samples[Sample] * Size.Y * 0.5f;
+
+			DrawList.AddLine(new Vector2(X1, Y1), new Vector2(X2, Y2), ImGui.GetColorU32(ImGuiCol.PlotLines), 1.5f);
+		}
 	}
 
 	public readonly static DebugProc DebugProcCallback = Window_DebugProc;

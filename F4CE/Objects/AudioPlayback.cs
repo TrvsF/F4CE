@@ -1,8 +1,11 @@
-﻿using NAudio.Wave;
+﻿using ImGuiNET;
+using NAudio.Utils;
+using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Numerics;
 using System.Reflection.PortableExecutable;
 
 namespace F4CE.Objects;
@@ -14,12 +17,6 @@ internal class OAudioPlayback
 	public bool IsRecording { get; private set; } = false;
 	public bool IsPlaying { get; private set; } = false;
 	public long Length { get => Stream.Length; }
-
-	public void CopyToMemeoryStream(OAudioPlayback InPlayback)
-	{
-		Stream.Position = 0;
-		Stream.CopyTo(InPlayback.Stream);
-	}
 
 	private WaveInEvent WaveIn;
 	private WaveFileWriter Writer;
@@ -138,5 +135,69 @@ internal class OAudioPlayback
 		CombinedPlayback.Stream.Position = 0;
 
 		return CombinedPlayback;
+	}
+
+	public float[] GetWaveform(int SampleCount = 512, float Sensitivity = 1.0f)
+	{
+		if (Stream.Length == 0)
+		{
+			return [];
+		}
+
+		long OldPos = Stream.Position;
+		Stream.Position = 0;
+
+		using WaveFileReader Reader = new(Stream);
+
+		ISampleProvider Provider = Reader.ToSampleProvider();
+
+		List<float> Samples = new();
+		float[] Buffer = new float[1024];
+
+		int Read;
+		while ((Read = Provider.Read(Buffer, 0, Buffer.Length)) > 0)
+		{
+			for (int ReadIndex = 0; ReadIndex < Read; ReadIndex++)
+			{
+				float Sample = Buffer[ReadIndex] * Sensitivity;
+
+				Sample = Math.Clamp(Sample, -1f, 1f);
+
+				Samples.Add(Sample);
+			}
+		}
+
+		Stream.Position = OldPos;
+
+		if (Samples.Count == 0)
+		{
+			return [];
+		}
+
+		float[] Result = new float[SampleCount];
+
+		float Stride = (float)Samples.Count / SampleCount;
+
+		for (int i = 0; i < SampleCount; i++)
+		{
+			int Start = (int)(i * Stride);
+			int End = Math.Min((int)((i + 1) * Stride), Samples.Count);
+
+			float Peak = 0f;
+
+			for (int j = Start; j < End; j++)
+			{
+				float Abs = Math.Abs(Samples[j]);
+
+				if (Abs > Peak)
+				{
+					Peak = Abs;
+				}
+			}
+
+			Result[i] = Peak;
+		}
+
+		return Result;
 	}
 }
