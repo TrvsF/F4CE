@@ -78,6 +78,7 @@ internal class Window : GameWindow
 
 	private readonly List<OAudioPlayback> StoredPlaybacks = new();
 	private OAudioPlayback CurrentPlayback = null;
+	private float SilenceSeconds = 1.0f;
 
 	private void DrawMainImgui()
 	{
@@ -85,24 +86,35 @@ internal class Window : GameWindow
 
 		CurrentPlayback ??= new OAudioPlayback();
 
-		if (!CurrentPlayback.IsRecording)
+		ImGui.InputFloat("Silence Length (Seconds)", ref SilenceSeconds);
+
+		if (ImGui.Button("Create Silent Playback", new Vector2(160, 40)))
 		{
-			if (ImGui.Button("Start Recording", new Vector2(160, 40)))
-			{
-				CurrentPlayback.StartRecording();
-			}
+			CurrentPlayback.SetSilence(TimeSpan.FromSeconds(SilenceSeconds));
+
+			StoredPlaybacks.Add(CurrentPlayback);
+			CurrentPlayback = null;
 		}
 		else
 		{
-			if (ImGui.Button("Stop Recording", new Vector2(160, 40)))
+			if (!CurrentPlayback.IsRecording)
 			{
-				CurrentPlayback.StopRecording();
-				StoredPlaybacks.Add(CurrentPlayback);
-				CurrentPlayback = null;
+				if (ImGui.Button("Start Recording", new Vector2(160, 40)))
+				{
+					CurrentPlayback.StartRecording();
+				}
+			}
+			else
+			{
+				if (ImGui.Button("Stop Recording", new Vector2(160, 40)))
+				{
+					CurrentPlayback.StopRecording();
+					StoredPlaybacks.Add(CurrentPlayback);
+					CurrentPlayback = null;
+				}
 			}
 		}
 
-		ImGui.NewLine();
 		ImGui.NewLine();
 
 		int Count = 0;
@@ -125,8 +137,9 @@ internal class Window : GameWindow
 				}
 			}
 
-			float[] Waveform = Playback.GetWaveform(1024, 3.0f);
-			DrawWaveform(Waveform, new Vector2(400, 100));
+			int WaveLength = (int)(Playback.Length * 0.0005f);
+			float[] Waveform = Playback.GetWaveform(WaveLength * 10, 3.0f);
+			DrawWaveform(Waveform, new Vector2(WaveLength, 100));
 
 			++Count;
 		}
@@ -134,7 +147,7 @@ internal class Window : GameWindow
 		if (ImGui.Button("Play All"))
 		{
 			OAudioPlayback Playback = OAudioPlayback.CombinePlaybacks(StoredPlaybacks); // TODO : makea ref
-			Playback.PlayRecording();
+			Playback.PlaySWave();
 		}
 
 		ImGui.End();
