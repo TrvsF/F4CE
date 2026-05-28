@@ -77,77 +77,25 @@ internal class Window : GameWindow
 	}
 
 	private readonly List<OAudioPlayback> StoredPlaybacks = new();
-	private OAudioPlayback CurrentPlayback = null;
-	private float SilenceSeconds = 1.0f;
+	private OAudioPlayback CurrentPlayback = new();
 
 	private void DrawMainImgui()
 	{
 		ImGui.Begin("main");
 
-		CurrentPlayback ??= new OAudioPlayback();
-
-		ImGui.InputFloat("Silence Length (Seconds)", ref SilenceSeconds);
-
-		if (ImGui.Button("Create Silent Playback", new Vector2(160, 40)))
+		if (CurrentPlayback.HasRecording)
 		{
-			CurrentPlayback.SetSilence(TimeSpan.FromSeconds(SilenceSeconds));
+			CurrentPlayback = new();
+		}
 
+		if (!StoredPlaybacks.Contains(CurrentPlayback))
+		{
 			StoredPlaybacks.Add(CurrentPlayback);
-			CurrentPlayback = null;
-		}
-		else
-		{
-			if (!CurrentPlayback.IsRecording)
-			{
-				if (ImGui.Button("Start Recording", new Vector2(160, 40)))
-				{
-					CurrentPlayback.StartRecording();
-				}
-			}
-			else
-			{
-				if (ImGui.Button("Stop Recording", new Vector2(160, 40)))
-				{
-					CurrentPlayback.StopRecording();
-					StoredPlaybacks.Add(CurrentPlayback);
-					CurrentPlayback = null;
-				}
-			}
 		}
 
-		ImGui.NewLine();
-
-		int Count = 0;
-		foreach (var Playback in StoredPlaybacks)
+		foreach (var StoredPlayback in StoredPlaybacks)
 		{
-			ImGui.SameLine();
-			float Length = Playback.Length * 0.001f;
-			if (!Playback.IsPlaying)
-			{
-				if (ImGui.Button($"Track {Count}", new Vector2(Length, 40)))
-				{
-					Playback.PlayRecording();
-				}
-			}
-			else
-			{
-				if (ImGui.Button($"GO {Count}", new Vector2(Length, 40)))
-				{
-					Playback.StopPlayback();
-				}
-			}
-
-			int WaveLength = (int)(Playback.Length * 0.0005f);
-			float[] Waveform = Playback.GetWaveform(WaveLength * 10, 3.0f);
-			DrawWaveform(Waveform, new Vector2(WaveLength, 100));
-
-			++Count;
-		}
-
-		if (ImGui.Button("Play All"))
-		{
-			OAudioPlayback Playback = OAudioPlayback.CombinePlaybacks(StoredPlaybacks); // TODO : makea ref
-			Playback.PlaySWave();
+			StoredPlayback.DrawBlock();
 		}
 
 		ImGui.End();
@@ -159,14 +107,12 @@ internal class Window : GameWindow
 		ImguiImplOpenTK4.Shutdown();
 	}
 
-	private readonly Random RandomImGuiIdChrist = new();
-
-	public void DrawWaveform(float[] Samples, Vector2 Size)
+	public static void DrawWaveform(float[] Samples, Vector2 Size)
 	{
 		ImDrawListPtr DrawList = ImGui.GetWindowDrawList();
 		Vector2 Pos = ImGui.GetCursorScreenPos();
 
-		ImGui.InvisibleButton($"Waveform{RandomImGuiIdChrist.NextSingle()}", Size);
+		ImGui.InvisibleButton($"Waveform", Size);
 
 		float MidY = Pos.Y + Size.Y * 0.5f;
 

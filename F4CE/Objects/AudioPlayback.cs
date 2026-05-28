@@ -69,13 +69,13 @@ internal class OFrequencyShiftSampleProvider : ISampleProvider
 	}
 }
 
-internal class OAudioPlayback
+internal partial class OAudioPlayback
 {
-	public MemoryStream Stream { get; } = new();
+	public MemoryStream MemoryStream { get; } = new();
 
 	public bool IsRecording { get; private set; } = false;
 	public bool IsPlaying { get; private set; } = false;
-	public long Length { get => Stream.Length; }
+	public long Length { get => MemoryStream.Length; }
 
 	private WaveInEvent WaveIn;
 	private WaveFileWriter Writer;
@@ -100,21 +100,21 @@ internal class OAudioPlayback
 			Writer.Flush();
 		}
 
-		Stream.Position = 0;
-		Stream.SetLength(0);
+		MemoryStream.Position = 0;
+		MemoryStream.SetLength(0);
 
 		TempStream.Position = 0;
-		TempStream.CopyTo(Stream);
+		TempStream.CopyTo(MemoryStream);
 
-		Stream.Position = 0;
+		MemoryStream.Position = 0;
 	}
 
 	public void StartRecording()
 	{
 		StopPlayback();
 
-		Stream.Position = 0;
-		Stream.SetLength(0);
+		MemoryStream.Position = 0;
+		MemoryStream.SetLength(0);
 
 		WaveIn = new WaveInEvent
 		{
@@ -122,7 +122,7 @@ internal class OAudioPlayback
 			WaveFormat = new WaveFormat(44100, 2)
 		};
 
-		Writer = new WaveFileWriter(Stream, WaveIn.WaveFormat);
+		Writer = new WaveFileWriter(MemoryStream, WaveIn.WaveFormat);
 
 		WaveIn.RecordingStopped += OnRecordingStopped;
 		WaveIn.DataAvailable += OnDataAvailable;
@@ -156,7 +156,7 @@ internal class OAudioPlayback
 
 	public void PlayRecording()
 	{
-		if (Stream.Length == 0)
+		if (MemoryStream.Length == 0)
 		{
 			Console.WriteLine("Nothing to play!");
 			return;
@@ -164,40 +164,13 @@ internal class OAudioPlayback
 
 		StopPlayback();
 
-		Stream.Seek(0, SeekOrigin.Begin);
-
-		var Stream1 = new MemoryStream(Stream.ToArray());
-		var Stream2 = new MemoryStream(Stream.ToArray());
-
-		var Reader1 = new WaveFileReader(Stream1);
-		var Reader2 = new WaveFileReader(Stream2);
-
-		ISampleProvider LeftProvider = new MonoToStereoSampleProvider(Reader1.ToSampleProvider())
-		{
-			LeftVolume = 1f,
-			RightVolume = 0f,
-		};
-
-		ISampleProvider RightProvider = new MonoToStereoSampleProvider(Reader2.ToSampleProvider())
-		{
-			LeftVolume = 0f,
-			RightVolume = 1f,
-		};
-
-		var Mixer = new MixingSampleProvider(WaveFormat.CreateIeeeFloatWaveFormat(Reader1.WaveFormat.SampleRate, 2))
-		{
-			ReadFully = true
-		};
-
-		Mixer.AddMixerInput(LeftProvider);
-		Mixer.AddMixerInput(RightProvider);
+		MemoryStream.Seek(0, SeekOrigin.Begin);
+		Reader = new WaveFileReader(MemoryStream);
 
 		WaveOut = new WaveOutEvent();
-
-		WaveOut.Init(Mixer);
+		WaveOut.Init(Reader);
 
 		WaveOut.PlaybackStopped += OnPlaybackStopped;
-
 		WaveOut.Play();
 
 		IsPlaying = true;
@@ -222,7 +195,7 @@ internal class OAudioPlayback
 
 	public void PlaySWave()
 	{
-		if (Stream.Length == 0)
+		if (MemoryStream.Length == 0)
 		{
 			Console.WriteLine("Nothing to play!");
 			return;
@@ -230,16 +203,16 @@ internal class OAudioPlayback
 
 		StopPlayback();
 
-		Stream.Position = 0;
+		MemoryStream.Position = 0;
 
-		MemoryStream PlaybackStream = new(Stream.ToArray());
+		MemoryStream PlaybackStream = new(MemoryStream.ToArray());
 		WaveFileReader PlaybackReader = new(PlaybackStream);
 
 		ISampleProvider Provider = PlaybackReader.ToSampleProvider();
 
 		Provider = new OFrequencyShiftSampleProvider(Provider)
 		{
-			Duration = Stream.Length,
+			Duration = MemoryStream.Length,
 		};
 
 		WaveOut = new WaveOutEvent();
@@ -265,14 +238,14 @@ internal class OAudioPlayback
 
 		foreach (var Playback in InPlaybacks)
 		{
-			if (Playback.Stream.Length == 0)
+			if (Playback.MemoryStream.Length == 0)
 			{
 				continue;
 			}
 
-			Playback.Stream.Position = 0;
+			Playback.MemoryStream.Position = 0;
 
-			WaveFileReader Reader = new(Playback.Stream);
+			WaveFileReader Reader = new(Playback.MemoryStream);
 			Providers.Add(Reader.ToSampleProvider());
 		}
 
@@ -284,24 +257,24 @@ internal class OAudioPlayback
 		}
 
 		ConcatenatingSampleProvider ConcatenatedProvider = new(Providers);
-		WaveFileWriter.WriteWavFileToStream(CombinedPlayback.Stream, ConcatenatedProvider.ToWaveProvider());
+		WaveFileWriter.WriteWavFileToStream(CombinedPlayback.MemoryStream, ConcatenatedProvider.ToWaveProvider());
 
-		CombinedPlayback.Stream.Position = 0;
+		CombinedPlayback.MemoryStream.Position = 0;
 
 		return CombinedPlayback;
 	}
 
 	public float[] GetWaveform(int SampleCount = 512, float Sensitivity = 1.0f)
 	{
-		if (Stream.Length == 0)
+		if (MemoryStream.Length == 0)
 		{
 			return [];
 		}
 
-		long OldPos = Stream.Position;
-		Stream.Position = 0;
+		long OldPos = MemoryStream.Position;
+		MemoryStream.Position = 0;
 
-		using WaveFileReader Reader = new(Stream);
+		using WaveFileReader Reader = new(MemoryStream);
 
 		ISampleProvider Provider = Reader.ToSampleProvider();
 
@@ -321,7 +294,7 @@ internal class OAudioPlayback
 			}
 		}
 
-		Stream.Position = OldPos;
+		MemoryStream.Position = OldPos;
 
 		if (Samples.Count == 0)
 		{
