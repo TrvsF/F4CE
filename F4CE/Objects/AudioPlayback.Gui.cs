@@ -11,11 +11,14 @@ namespace F4CE.Objects;
 
 internal partial class OAudioPlayback
 {
-	public bool HasRecording { get => MemoryStream.Length > 0 && !IsRecording; }
+	protected bool Raw = true;
+	protected float PanSpeed = 0f;
+	protected float SilenceSeconds = 30f;
+	protected int Rs = 3;
 
 	private readonly Guid ImGuiD = Guid.NewGuid();
 
-	private float SilenceSeconds = 30f;
+	public bool HasRecording { get => MemoryStream.Length > 0 && !IsRecording; }
 
 	public void DrawBlock()
 	{
@@ -23,28 +26,25 @@ internal partial class OAudioPlayback
 
 		if (!HasRecording)
 		{
-			ImGui.InputFloat("Silence Length (Seconds)", ref SilenceSeconds);
-
-			if (ImGui.Button("Create Silent Playback", new Vector2(160, 40)))
+			if (!IsRecording)
 			{
-				SetSilence(TimeSpan.FromSeconds(SilenceSeconds));
+				if (ImGui.Button("Start Recording", new Vector2(160, 20)))
+				{
+					StartRecording();
+				}
 			}
 			else
 			{
-				if (!IsRecording)
+				if (ImGui.Button("Stop Recording", new Vector2(160, 20)))
 				{
-					if (ImGui.Button("Start Recording", new Vector2(160, 40)))
-					{
-						StartRecording();
-					}
+					StopRecording();
 				}
-				else
-				{
-					if (ImGui.Button("Stop Recording", new Vector2(160, 40)))
-					{
-						StopRecording();
-					}
-				}
+			}
+
+			ImGui.SliderFloat("Silence Length (Seconds)", ref SilenceSeconds, 0f, 120f);
+			if (ImGui.Button("Create Silent Playback", new Vector2(160, 20)))
+			{
+				SetSilence(TimeSpan.FromSeconds(SilenceSeconds));
 			}
 
 			ImGui.PopID();
@@ -57,33 +57,33 @@ internal partial class OAudioPlayback
 		}
 
 		ImGui.NewLine();
-
-
-
 		ImGui.NewLine();
 
 		if (!IsPlaying)
 		{
-			if (ImGui.Button($"Play Recording", new Vector2(240, 40)))
+			if (ImGui.Button($"Play Recording", new Vector2(240, 80)))
 			{
 				PlayRecording();
-			}
-
-			if (ImGui.Button("Play Noise"))
-			{
-				PlaySWave();
 			}
 		}
 		else
 		{
-			if (ImGui.Button($"Stop", new Vector2(240, 40)))
+			if (ImGui.Button($"Stop", new Vector2(240, 80)))
 			{
 				StopPlayback();
 			}
 		}
-
+		ImGui.SameLine();
+		ImGui.Checkbox("Raw", ref Raw);
+		ImGui.SameLine();
+		ImGui.SetNextItemWidth(80);
+		ImGui.SliderFloat("PanSpeed", ref PanSpeed, 0f, 4f);
+		ImGui.SameLine();
+		ImGui.SetNextItemWidth(80);
+		ImGui.SliderInt("Rs", ref Rs, 0, 8);
+		ImGui.SameLine();
 		float[] Waveform = GetWaveform(480, 3.0f);
-		Window.DrawWaveform(Waveform, new Vector2(480, 100));
+		Window.DrawWaveform(Waveform, new Vector2(480, 80));
 
 		ImGui.PopID();
 	}

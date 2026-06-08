@@ -15,10 +15,11 @@ internal class OFrequencyShiftSampleProvider : ISampleProvider
 	private float Phase;
 	private float PanPhase;
 
-	// 0.25 = slow movement
-	// 1.0 = faster movement
+	public long Duration { get; init; }
+
+	public bool Raw { get; set; } = true;
 	public float PanSpeed { get; set; } = 2f;
-	public long Duration { get; set; }
+	public int Rs { get; set; } = 6;
 
 	public WaveFormat WaveFormat => Source.WaveFormat;
 
@@ -36,21 +37,25 @@ internal class OFrequencyShiftSampleProvider : ISampleProvider
 	{
 		int Read = Source.Read(Buffer, Offset, Count);
 
+		if (Raw)
+		{
+			return Read;
+		}
+
 		float SampleRate = WaveFormat.SampleRate;
 
-		// Stereo interleaved:
-		// Left  = index 0
-		// Right = index 1
 		for (int ReadIndex = 0; ReadIndex < Read; ReadIndex += 2)
 		{
 			float Time = Phase * 4;
 
 			float Frequency = MathF.Sin(Time * 0.3f) * 960f;
 
-			float Sample =
-				MathF.Sin(2f * MathF.PI * Frequency * Time) * 0.5f +
-				MathF.Sin(2f * MathF.PI * Frequency * 2f * Time) * 0.25f +
-				MathF.Sin(2f * MathF.PI * Frequency * 4f * Time) * 0.1f;
+			float Sample = 0f;
+			float RFactor = 0.5f;
+			for (int RIndex = Rs; RIndex > 0; --RIndex)
+			{
+				Sample += MathF.Sin(2f * MathF.PI * Frequency * Time) * (RFactor / RIndex); 
+			}
 
 			Sample *= 0.2f;
 			float Pan = MathF.Sin(2f * MathF.PI * PanSpeed * PanPhase);
@@ -58,8 +63,8 @@ internal class OFrequencyShiftSampleProvider : ISampleProvider
 			float LeftGain = (1f - Pan) * 0.5f;
 			float RightGain = (1f + Pan) * 0.5f;
 
-			Buffer[Offset + ReadIndex] = Sample * LeftGain;
-			Buffer[Offset + ReadIndex + 1] = Sample * RightGain;
+			Buffer[Offset + ReadIndex] += Sample * LeftGain;
+			Buffer[Offset + ReadIndex + 1] += Sample * RightGain;
 
 			Phase += 1f / SampleRate;
 			PanPhase += 1f / SampleRate;
@@ -79,6 +84,8 @@ internal partial class OAudioPlayback
 
 	private WaveInEvent WaveIn;
 	private WaveFileWriter Writer;
+
+	private bool IsSilence = false; // TODO : detect this
 
 	public void SetSilence(TimeSpan Duration)
 	{
@@ -107,6 +114,7 @@ internal partial class OAudioPlayback
 		TempStream.CopyTo(MemoryStream);
 
 		MemoryStream.Position = 0;
+		IsSilence = true;
 	}
 
 	public void StartRecording()
@@ -165,12 +173,32 @@ internal partial class OAudioPlayback
 		StopPlayback();
 
 		MemoryStream.Seek(0, SeekOrigin.Begin);
-		Reader = new WaveFileReader(MemoryStream);
+
+		MemoryStream PlaybackStream = new(MemoryStream.ToArray());
+		WaveFileReader PlaybackReader = new(PlaybackStream);
+
+		ISampleProvider Provider = PlaybackReader.ToSampleProvider();
+
+		Provider = new OFrequencyShiftSampleProvider(Provider)
+		{
+			Duration = MemoryStream.Length,
+			Raw = Raw,
+			Rs = Rs,
+			PanSpeed = PanSpeed,
+		};
 
 		WaveOut = new WaveOutEvent();
-		WaveOut.Init(Reader);
 
-		WaveOut.PlaybackStopped += OnPlaybackStopped;
+		WaveOut.Init(Provider);
+
+		WaveOut.PlaybackStopped += (Sender, Args) =>
+		{
+			PlaybackReader.Dispose();
+			PlaybackStream.Dispose();
+
+			OnPlaybackStopped(Sender, Args);
+		};
+
 		WaveOut.Play();
 
 		IsPlaying = true;
@@ -191,45 +219,6 @@ internal partial class OAudioPlayback
 		WaveOut = null;
 
 		IsPlaying = false;
-	}
-
-	public void PlaySWave()
-	{
-		if (MemoryStream.Length == 0)
-		{
-			Console.WriteLine("Nothing to play!");
-			return;
-		}
-
-		StopPlayback();
-
-		MemoryStream.Position = 0;
-
-		MemoryStream PlaybackStream = new(MemoryStream.ToArray());
-		WaveFileReader PlaybackReader = new(PlaybackStream);
-
-		ISampleProvider Provider = PlaybackReader.ToSampleProvider();
-
-		Provider = new OFrequencyShiftSampleProvider(Provider)
-		{
-			Duration = MemoryStream.Length,
-		};
-
-		WaveOut = new WaveOutEvent();
-
-		WaveOut.Init(Provider);
-
-		WaveOut.PlaybackStopped += (Sender, Args) =>
-		{
-			PlaybackReader.Dispose();
-			PlaybackStream.Dispose();
-
-			OnPlaybackStopped(Sender, Args);
-		};
-
-		WaveOut.Play();
-
-		IsPlaying = true;
 	}
 
 	public static OAudioPlayback CombinePlaybacks(IEnumerable<OAudioPlayback> InPlaybacks)

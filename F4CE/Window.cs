@@ -45,6 +45,9 @@ internal class Window : GameWindow
 
 		ImguiImplOpenTK4.Init(this);
 		ImguiImplOpenGL3.Init();
+
+		//////////////////////////////////////////////////
+		SetupPlaybacks();
 	}
 
 	protected override void OnRenderFrame(FrameEventArgs EventArgs)
@@ -77,21 +80,18 @@ internal class Window : GameWindow
 	}
 
 	private readonly List<OAudioPlayback> StoredPlaybacks = new();
-	private OAudioPlayback CurrentPlayback = new();
+
+	private void SetupPlaybacks(int PlaybackCount = 4)
+	{
+		for (int Playback = 0; Playback < PlaybackCount; ++Playback)
+		{
+			StoredPlaybacks.Add(new());
+		}
+	}
 
 	private void DrawMainImgui()
 	{
 		ImGui.Begin("main");
-
-		if (CurrentPlayback.HasRecording)
-		{
-			CurrentPlayback = new();
-		}
-
-		if (!StoredPlaybacks.Contains(CurrentPlayback))
-		{
-			StoredPlaybacks.Add(CurrentPlayback);
-		}
 
 		foreach (var StoredPlayback in StoredPlaybacks)
 		{
