@@ -1,6 +1,8 @@
 ﻿using F4CE.Backends;
 using F4CE.Objects;
 using ImGuiNET;
+using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
@@ -98,6 +100,11 @@ internal class Window : GameWindow
 			StoredPlayback.DrawBlock();
 		}
 
+		if (ImGui.Button("Save All Playbacks (Render)", new Vector2(260, 30)))
+		{
+			SaveAllPlaybacksToFile();
+		}
+
 		ImGui.End();
 	}
 
@@ -126,6 +133,66 @@ internal class Window : GameWindow
 
 			DrawList.AddLine(new Vector2(X1, Y1), new Vector2(X2, Y2), ImGui.GetColorU32(ImGuiCol.PlotLines), 1.5f);
 		}
+	}
+
+	private void SaveAllPlaybacksToFile()
+	{
+		if (StoredPlaybacks.Count == 0)
+		{
+			return;
+		}
+
+		string DesktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+		string Path = System.IO.Path.Combine(DesktopPath, "F4CE.wav");
+
+		List<ISampleProvider> RenderedProviders = new();
+
+		foreach (var Playback in StoredPlaybacks)
+		{
+			if (Playback.MemoryStream.Length == 0)
+			{
+				continue;
+			}
+
+			MemoryStream CopyStream = new(Playback.MemoryStream.ToArray());
+			WaveFileReader Reader = new(CopyStream);
+
+			ISampleProvider BaseProvider = Reader.ToSampleProvider();
+
+			OFrequencyShiftSampleProvider Shifted = new(BaseProvider)
+			{
+				Duration = Playback.Length,
+				Raw = Playback.Raw,
+				Rs = Playback.Rs,
+				PanSpeed = Playback.PanSpeed,
+				TransposeSemitones = Playback.Transpose,
+				WaveExpression = Playback.WaveExpression,
+			};
+
+			RenderedProviders.Add(Shifted);
+		}
+
+		if (RenderedProviders.Count == 0)
+		{
+			return;
+		}
+
+		MixingSampleProvider Mixer = new(RenderedProviders);
+		Mixer.ReadFully = false;
+
+		WaveFormat Format = Mixer.WaveFormat;
+
+		using WaveFileWriter Writer = new WaveFileWriter(Path, Format);
+
+		float[] Buffer = new float[1024];
+		int Read;
+
+		while ((Read = Mixer.Read(Buffer, 0, Buffer.Length)) > 0)
+		{
+			Writer.WriteSamples(Buffer, 0, Read);
+		}
+
+		Writer.Flush();
 	}
 
 	public readonly static DebugProc DebugProcCallback = Window_DebugProc;

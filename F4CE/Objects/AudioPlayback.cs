@@ -5,6 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using NCalc;
+using System.Reflection.Metadata.Ecma335;
 
 namespace F4CE.Objects;
 
@@ -17,7 +19,9 @@ internal class OFrequencyShiftSampleProvider : ISampleProvider
 
 	public long Duration { get; init; }
 
+	public string WaveExpression { get; set; } = "f";
 	public bool Raw { get; set; } = true;
+	public float TransposeSemitones { get; set; } = 0f;
 	public float PanSpeed { get; set; } = 2f;
 	public int Rs { get; set; } = 6;
 
@@ -33,6 +37,57 @@ internal class OFrequencyShiftSampleProvider : ISampleProvider
 		}
 	}
 
+	public bool IsExpressionValid => CachedGoodExpression == WaveExpression;
+	private string CachedGoodExpression = "";
+	private string CachedBadExpression = "";
+	private Expression Expression = null;
+
+	private float EvaluateWave(float Frequency, float Time)
+	{
+		if (CachedGoodExpression == WaveExpression || CachedBadExpression == WaveExpression)
+		{
+			Expression.Parameters["f"] = Frequency;
+			Expression.Parameters["t"] = Time;
+			return Convert.ToSingle(Expression.Evaluate());
+		}
+
+		var NewExpression = new Expression(WaveExpression);
+
+		NewExpression.Parameters["f"] = Frequency;
+		NewExpression.Parameters["t"] = Time;
+		NewExpression.Parameters["PI"] = MathF.PI;
+
+		NewExpression.EvaluateFunction += (Expression, Args) =>
+		{
+			switch (Expression.ToLowerInvariant())
+			{
+				case "sin":
+					Args.Result = MathF.Sin(Convert.ToSingle(Args.Parameters[0].Evaluate()));
+					break;
+
+				case "cos":
+					Args.Result = MathF.Cos(Convert.ToSingle(Args.Parameters[0].Evaluate()));
+					break;
+
+				case "tan":
+					Args.Result = MathF.Tan(Convert.ToSingle(Args.Parameters[0].Evaluate()));
+					break;
+			}
+		};
+
+		if (NewExpression.HasErrors())
+		{
+			CachedBadExpression = WaveExpression;
+			Expression.Parameters["f"] = Frequency;
+			Expression.Parameters["t"] = Time;
+			return Convert.ToSingle(Expression.Evaluate());
+		}
+
+		Expression = NewExpression;
+		CachedGoodExpression = WaveExpression;
+		return Convert.ToSingle(Expression.Evaluate());
+	}
+
 	public int Read(float[] Buffer, int Offset, int Count)
 	{
 		int Read = Source.Read(Buffer, Offset, Count);
@@ -46,25 +101,23 @@ internal class OFrequencyShiftSampleProvider : ISampleProvider
 
 		for (int ReadIndex = 0; ReadIndex < Read; ReadIndex += 2)
 		{
-			float Time = Phase * 4;
+			float PitchScale = MathF.Pow(2f, TransposeSemitones / 12f);
+			float Frequency = Buffer[Offset + ReadIndex] * PitchScale;
+			float Sample = EvaluateWave(Frequency, Phase);
 
-			float Frequency = MathF.Sin(Time * 0.3f) * 960f;
-
-			float Sample = 0f;
 			float RFactor = 0.5f;
 			for (int RIndex = Rs; RIndex > 0; --RIndex)
 			{
-				Sample += MathF.Sin(2f * MathF.PI * Frequency * Time) * (RFactor / RIndex); 
+				Sample += Sample * (RFactor / RIndex);
 			}
 
-			Sample *= 0.2f;
 			float Pan = MathF.Sin(2f * MathF.PI * PanSpeed * PanPhase);
 
 			float LeftGain = (1f - Pan) * 0.5f;
 			float RightGain = (1f + Pan) * 0.5f;
 
-			Buffer[Offset + ReadIndex] += Sample * LeftGain;
-			Buffer[Offset + ReadIndex + 1] += Sample * RightGain;
+			Buffer[Offset + ReadIndex] = Sample * LeftGain;
+			Buffer[Offset + ReadIndex + 1] = Sample * RightGain;
 
 			Phase += 1f / SampleRate;
 			PanPhase += 1f / SampleRate;
@@ -84,8 +137,6 @@ internal partial class OAudioPlayback
 
 	private WaveInEvent WaveIn;
 	private WaveFileWriter Writer;
-
-	private bool IsSilence = false; // TODO : detect this
 
 	public void SetSilence(TimeSpan Duration)
 	{
@@ -114,7 +165,6 @@ internal partial class OAudioPlayback
 		TempStream.CopyTo(MemoryStream);
 
 		MemoryStream.Position = 0;
-		IsSilence = true;
 	}
 
 	public void StartRecording()
@@ -161,6 +211,22 @@ internal partial class OAudioPlayback
 
 	private WaveOutEvent WaveOut;
 	private WaveFileReader Reader;
+	private OFrequencyShiftSampleProvider OProvider;
+	public bool IsInputValid { get => OProvider != null && !OProvider.IsExpressionValid; }
+
+	public void SetProviderSettings()
+	{
+		if (OProvider == null)
+		{
+			return;
+		}
+
+		OProvider.Raw = Raw;
+		OProvider.Rs = Rs;
+		OProvider.PanSpeed = PanSpeed;
+		OProvider.TransposeSemitones = Transpose;
+		OProvider.WaveExpression = WaveExpression;
+	}
 
 	public void PlayRecording()
 	{
@@ -179,17 +245,15 @@ internal partial class OAudioPlayback
 
 		ISampleProvider Provider = PlaybackReader.ToSampleProvider();
 
-		Provider = new OFrequencyShiftSampleProvider(Provider)
+		OProvider = new OFrequencyShiftSampleProvider(Provider)
 		{
 			Duration = MemoryStream.Length,
-			Raw = Raw,
-			Rs = Rs,
-			PanSpeed = PanSpeed,
 		};
+		SetProviderSettings();
 
 		WaveOut = new WaveOutEvent();
 
-		WaveOut.Init(Provider);
+		WaveOut.Init(OProvider);
 
 		WaveOut.PlaybackStopped += (Sender, Args) =>
 		{
@@ -218,6 +282,7 @@ internal partial class OAudioPlayback
 		WaveOut?.Dispose();
 		WaveOut = null;
 
+		OProvider = null;
 		IsPlaying = false;
 	}
 
