@@ -14,6 +14,7 @@ internal partial class OAudioPlayback
 {
 	public string WaveExpression = "f*t";
 	public bool Raw = false;
+	public float PlaybackSpeed = 1f;
 	public float PanSpeed = 0f;
 	public float Transpose = 0f;
 	public float SilenceSeconds = 30f;
@@ -81,6 +82,9 @@ internal partial class OAudioPlayback
 		ImGui.SameLine();
 		ImGui.SetNextItemWidth(80);
 		ImGui.SliderFloat("PanSpeed", ref PanSpeed, 0f, 20f);
+		ImGui.SameLine();
+		ImGui.SetNextItemWidth(80);
+		ImGui.SliderFloat("PlaybackSpeed", ref PlaybackSpeed, 0.1f, 5f);
 		ImGui.SameLine();
 		ImGui.SetNextItemWidth(80);
 		ImGui.SliderInt("Rs", ref Rs, 0, 8);

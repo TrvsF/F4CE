@@ -4,128 +4,8 @@ using NAudio.Wave.SampleProviders;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using NCalc;
-using System.Reflection.Metadata.Ecma335;
 
 namespace F4CE.Objects;
-
-internal class OFrequencyShiftSampleProvider : ISampleProvider
-{
-	private readonly ISampleProvider Source;
-
-	private float Phase;
-	private float PanPhase;
-
-	public long Duration { get; init; }
-
-	public string WaveExpression { get; set; } = "f";
-	public bool Raw { get; set; } = true;
-	public float TransposeSemitones { get; set; } = 0f;
-	public float PanSpeed { get; set; } = 2f;
-	public int Rs { get; set; } = 6;
-
-	public WaveFormat WaveFormat => Source.WaveFormat;
-
-	public OFrequencyShiftSampleProvider(ISampleProvider InSource)
-	{
-		Source = InSource;
-
-		if (WaveFormat.Channels != 2)
-		{
-			throw new InvalidOperationException("Stereo output required");
-		}
-	}
-
-	public bool IsExpressionValid => CachedGoodExpression == WaveExpression;
-	private string CachedGoodExpression = "";
-	private string CachedBadExpression = "";
-	private Expression Expression = null;
-
-	private float EvaluateWave(float Frequency, float Time)
-	{
-		if (CachedGoodExpression == WaveExpression || CachedBadExpression == WaveExpression)
-		{
-			Expression.Parameters["f"] = Frequency;
-			Expression.Parameters["t"] = Time;
-			return Convert.ToSingle(Expression.Evaluate());
-		}
-
-		var NewExpression = new Expression(WaveExpression);
-
-		NewExpression.Parameters["f"] = Frequency;
-		NewExpression.Parameters["t"] = Time;
-		NewExpression.Parameters["PI"] = MathF.PI;
-
-		NewExpression.EvaluateFunction += (Expression, Args) =>
-		{
-			switch (Expression.ToLowerInvariant())
-			{
-				case "sin":
-					Args.Result = MathF.Sin(Convert.ToSingle(Args.Parameters[0].Evaluate()));
-					break;
-
-				case "cos":
-					Args.Result = MathF.Cos(Convert.ToSingle(Args.Parameters[0].Evaluate()));
-					break;
-
-				case "tan":
-					Args.Result = MathF.Tan(Convert.ToSingle(Args.Parameters[0].Evaluate()));
-					break;
-			}
-		};
-
-		if (NewExpression.HasErrors())
-		{
-			CachedBadExpression = WaveExpression;
-			Expression.Parameters["f"] = Frequency;
-			Expression.Parameters["t"] = Time;
-			return Convert.ToSingle(Expression.Evaluate());
-		}
-
-		Expression = NewExpression;
-		CachedGoodExpression = WaveExpression;
-		return Convert.ToSingle(Expression.Evaluate());
-	}
-
-	public int Read(float[] Buffer, int Offset, int Count)
-	{
-		int Read = Source.Read(Buffer, Offset, Count);
-
-		if (Raw)
-		{
-			return Read;
-		}
-
-		float SampleRate = WaveFormat.SampleRate;
-
-		for (int ReadIndex = 0; ReadIndex < Read; ReadIndex += 2)
-		{
-			float PitchScale = MathF.Pow(2f, TransposeSemitones / 12f);
-			float Frequency = Buffer[Offset + ReadIndex] * PitchScale;
-			float Sample = EvaluateWave(Frequency, Phase);
-
-			float RFactor = 0.5f;
-			for (int RIndex = Rs; RIndex > 0; --RIndex)
-			{
-				Sample += Sample * (RFactor / RIndex);
-			}
-
-			float Pan = MathF.Sin(2f * MathF.PI * PanSpeed * PanPhase);
-
-			float LeftGain = (1f - Pan) * 0.5f;
-			float RightGain = (1f + Pan) * 0.5f;
-
-			Buffer[Offset + ReadIndex] = Sample * LeftGain;
-			Buffer[Offset + ReadIndex + 1] = Sample * RightGain;
-
-			Phase += 1f / SampleRate;
-			PanPhase += 1f / SampleRate;
-		}
-
-		return Read;
-	}
-}
 
 internal partial class OAudioPlayback
 {
@@ -226,6 +106,7 @@ internal partial class OAudioPlayback
 		OProvider.PanSpeed = PanSpeed;
 		OProvider.TransposeSemitones = Transpose;
 		OProvider.WaveExpression = WaveExpression;
+		OProvider.PlaybackSpeed = PlaybackSpeed;
 	}
 
 	public void PlayRecording()

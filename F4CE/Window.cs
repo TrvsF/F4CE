@@ -162,11 +162,14 @@ internal class Window : GameWindow
 			OFrequencyShiftSampleProvider Shifted = new(BaseProvider)
 			{
 				Duration = Playback.Length,
+
+				// TODO : these should not come from here
 				Raw = Playback.Raw,
 				Rs = Playback.Rs,
 				PanSpeed = Playback.PanSpeed,
 				TransposeSemitones = Playback.Transpose,
 				WaveExpression = Playback.WaveExpression,
+				PlaybackSpeed = Playback.PlaybackSpeed,
 			};
 
 			RenderedProviders.Add(Shifted);
