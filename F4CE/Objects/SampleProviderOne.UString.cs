@@ -4,7 +4,7 @@ using NCalc;
 
 namespace F4CE.Objects;
 
-internal partial class OFrequencyShiftSampleProvider : ISampleProvider
+internal partial class OSampleProviderOne : ISampleProvider
 {
 	public bool IsExpressionValid => CachedGoodExpression == WaveExpression;
 	private string CachedGoodExpression = "";

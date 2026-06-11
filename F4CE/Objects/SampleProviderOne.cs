@@ -3,7 +3,8 @@ using System;
 using NCalc;
 
 namespace F4CE.Objects;
-internal partial class OFrequencyShiftSampleProvider : ISampleProvider
+
+internal partial class OSampleProviderOne : ISampleProvider
 {
 	private readonly ISampleProvider Source;
 
@@ -13,12 +14,14 @@ internal partial class OFrequencyShiftSampleProvider : ISampleProvider
 	public bool Raw { get; set; } = true;
 	public float TransposeSemitones { get; set; } = 0f;
 	public float PlaybackSpeed { get; set; } = 1f;
+	public float PanBaseVolume { get; set; } = 0f;
 	public float PanSpeed { get; set; } = 2f;
+	public float Loudness { get; set; } = 1f;
 	public int Rs { get; set; } = 6;
 
 	public WaveFormat WaveFormat => Source.WaveFormat;
 
-	public OFrequencyShiftSampleProvider(ISampleProvider InSource)
+	public OSampleProviderOne(ISampleProvider InSource)
 	{
 		Source = InSource;
 
@@ -70,11 +73,11 @@ internal partial class OFrequencyShiftSampleProvider : ISampleProvider
 
 			float Pan = MathF.Sin(2f * MathF.PI * PanSpeed * PanPhase);
 
-			float LeftGain = (1f - Pan) * 0.5f;
-			float RightGain = (1f + Pan) * 0.5f;
+			float LeftGain = MathF.Min((1f - Pan) * 0.5f + PanBaseVolume, 1f);
+			float RightGain = MathF.Min((1f + Pan) * 0.5f + PanBaseVolume, 1f);
 
-			Buffer[Offset + ReadIndex] = Sample * LeftGain;
-			Buffer[Offset + ReadIndex + 1] = Sample * RightGain;
+			Buffer[Offset + ReadIndex] = Sample * LeftGain * Loudness;
+			Buffer[Offset + ReadIndex + 1] = Sample * RightGain * Loudness;
 
 			Phase += 1f / SampleRate;
 			PanPhase += 1f / SampleRate;
@@ -98,7 +101,8 @@ internal partial class OFrequencyShiftSampleProvider : ISampleProvider
 			int Frame0 = (int)SpeedPosition;
 			int Frame1 = Frame0 + 1;
 
-			int RequiredSamples = (Frame1 + 1) * Channels + (2); // a lil on the side
+			int NextConsumedFrames = (int) (SpeedPosition + PlaybackSpeed);
+			int RequiredSamples = Math.Max(Frame1 + 1, NextConsumedFrames) * Channels;
 
 			if (!FillSpeedBuffer(RequiredSamples))
 			{
@@ -120,12 +124,11 @@ internal partial class OFrequencyShiftSampleProvider : ISampleProvider
 			SpeedPosition += PlaybackSpeed;
 
 			int ConsumedFrames = (int)SpeedPosition;
-
 			if (ConsumedFrames > 0)
 			{
-				SpeedPosition -= ConsumedFrames;
 				int ConsumedSamples = ConsumedFrames * Channels;
 
+				SpeedPosition -= ConsumedFrames;
 				SpeedBufferStart += ConsumedSamples;
 				SpeedBufferCount -= ConsumedSamples;
 			}

@@ -91,7 +91,7 @@ internal partial class OAudioPlayback
 
 	private WaveOutEvent WaveOut;
 	private WaveFileReader Reader;
-	private OFrequencyShiftSampleProvider OProvider;
+	private OSampleProviderOne OProvider;
 	public bool IsInputValid { get => OProvider != null && !OProvider.IsExpressionValid; }
 
 	public void SetProviderSettings()
@@ -107,6 +107,8 @@ internal partial class OAudioPlayback
 		OProvider.TransposeSemitones = Transpose;
 		OProvider.WaveExpression = WaveExpression;
 		OProvider.PlaybackSpeed = PlaybackSpeed;
+		OProvider.Loudness = Loudness;
+		OProvider.PanBaseVolume = PanBaseVolume;
 	}
 
 	public void PlayRecording()
@@ -126,7 +128,7 @@ internal partial class OAudioPlayback
 
 		ISampleProvider Provider = PlaybackReader.ToSampleProvider();
 
-		OProvider = new OFrequencyShiftSampleProvider(Provider)
+		OProvider = new OSampleProviderOne(Provider)
 		{
 			Duration = MemoryStream.Length,
 		};

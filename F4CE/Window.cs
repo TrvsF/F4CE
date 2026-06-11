@@ -61,7 +61,7 @@ internal class Window : GameWindow
 		ImGui.NewFrame();
 
 		ImGui.DockSpaceOverViewport();
-		ImGui.ShowDemoWindow();
+		//ImGui.ShowDemoWindow();
 
 		DrawMainImgui();
 
@@ -159,7 +159,7 @@ internal class Window : GameWindow
 
 			ISampleProvider BaseProvider = Reader.ToSampleProvider();
 
-			OFrequencyShiftSampleProvider Shifted = new(BaseProvider)
+			OSampleProviderOne Shifted = new(BaseProvider)
 			{
 				Duration = Playback.Length,
 
@@ -170,6 +170,8 @@ internal class Window : GameWindow
 				TransposeSemitones = Playback.Transpose,
 				WaveExpression = Playback.WaveExpression,
 				PlaybackSpeed = Playback.PlaybackSpeed,
+				Loudness = Playback.Loudness,
+				PanBaseVolume = Playback.PanBaseVolume,
 			};
 
 			RenderedProviders.Add(Shifted);

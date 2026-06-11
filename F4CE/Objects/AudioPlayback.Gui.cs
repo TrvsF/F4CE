@@ -15,9 +15,11 @@ internal partial class OAudioPlayback
 	public string WaveExpression = "f*t";
 	public bool Raw = false;
 	public float PlaybackSpeed = 1f;
+	public float SilenceSeconds = 30f;
+	public float PanBaseVolume = 0f;
 	public float PanSpeed = 0f;
 	public float Transpose = 0f;
-	public float SilenceSeconds = 30f;
+	public float Loudness = 1f;
 	public int Rs = 3;
 
 	private readonly Guid ImGuiD = Guid.NewGuid();
@@ -49,6 +51,7 @@ internal partial class OAudioPlayback
 			if (ImGui.Button("Create Silent Playback", new Vector2(160, 20)))
 			{
 				SetSilence(TimeSpan.FromSeconds(SilenceSeconds));
+				WaveExpression = "sin(t*PI*100)";
 			}
 
 			ImGui.PopID();
@@ -90,6 +93,12 @@ internal partial class OAudioPlayback
 		ImGui.SliderInt("Rs", ref Rs, 0, 8);
 		ImGui.SetNextItemWidth(80);
 		ImGui.SliderFloat("Transpose", ref Transpose, -12f, 12f);
+		ImGui.SameLine();
+		ImGui.SetNextItemWidth(80);
+		ImGui.SliderFloat("Loudness", ref Loudness, 0f, 4f);
+		ImGui.SameLine();
+		ImGui.SetNextItemWidth(80);
+		ImGui.SliderFloat("PanBaseVolume", ref PanBaseVolume, 0f, 1f);
 		ImGui.SameLine();
 
 		if (IsInputValid)
