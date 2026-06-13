@@ -9,15 +9,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 	private readonly ISampleProvider Source;
 
 	public long Duration { get; init; }
-
-	public string WaveExpression { get; set; } = "f*t";
-	public bool Raw { get; set; } = true;
-	public float TransposeSemitones { get; set; } = 0f;
-	public float PlaybackSpeed { get; set; } = 1f;
-	public float PanBaseVolume { get; set; } = 0f;
-	public float PanSpeed { get; set; } = 2f;
-	public float Loudness { get; set; } = 1f;
-	public int Rs { get; set; } = 6;
+	public FPlaybackSettings PlaybackSettings { get; set; }
 
 	public WaveFormat WaveFormat => Source.WaveFormat;
 
@@ -35,7 +27,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 	{
 		int Read;
 
-		if (PlaybackSpeed == 1f)
+		if (PlaybackSettings.PlaybackSpeed == 1f)
 		{
 			Read = Source.Read(Buffer, Offset, Count);
 		}
@@ -44,7 +36,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 			Read = ReadWithPlaybackSpeed(Buffer, Offset, Count);
 		}
 
-		if (Raw)
+		if (PlaybackSettings.Raw)
 		{
 			return Read;
 		}
@@ -61,23 +53,23 @@ internal partial class OSampleProviderOne : ISampleProvider
 
 		for (int ReadIndex = 0; ReadIndex < Read; ReadIndex += 2)
 		{
-			float PitchScale = MathF.Pow(2f, TransposeSemitones / 12f);
+			float PitchScale = MathF.Pow(2f, PlaybackSettings.TransposeSemitones / 12f);
 			float Frequency = Buffer[Offset + ReadIndex] * PitchScale;
 			float Sample = EvaluateWave(Frequency, Phase);
 
 			float RFactor = 0.5f;
-			for (int RIndex = Rs; RIndex > 0; --RIndex)
+			for (int RIndex = PlaybackSettings.Rs; RIndex > 0; --RIndex)
 			{
 				Sample += Sample * (RFactor / RIndex);
 			}
 
-			float Pan = MathF.Sin(2f * MathF.PI * PanSpeed * PanPhase);
+			float Pan = MathF.Sin(2f * MathF.PI * PlaybackSettings.PanSpeed * PanPhase);
 
-			float LeftGain = MathF.Min((1f - Pan) * 0.5f + PanBaseVolume, 1f);
-			float RightGain = MathF.Min((1f + Pan) * 0.5f + PanBaseVolume, 1f);
+			float LeftGain = MathF.Min((1f - Pan) * 0.5f + PlaybackSettings.PanBaseVolume, 1f);
+			float RightGain = MathF.Min((1f + Pan) * 0.5f + PlaybackSettings.PanBaseVolume, 1f);
 
-			Buffer[Offset + ReadIndex] = Sample * LeftGain * Loudness;
-			Buffer[Offset + ReadIndex + 1] = Sample * RightGain * Loudness;
+			Buffer[Offset + ReadIndex] = Sample * LeftGain * PlaybackSettings.Loudness;
+			Buffer[Offset + ReadIndex + 1] = Sample * RightGain * PlaybackSettings.Loudness;
 
 			Phase += 1f / SampleRate;
 			PanPhase += 1f / SampleRate;
@@ -101,7 +93,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 			int Frame0 = (int)SpeedPosition;
 			int Frame1 = Frame0 + 1;
 
-			int NextConsumedFrames = (int) (SpeedPosition + PlaybackSpeed);
+			int NextConsumedFrames = (int) (SpeedPosition + PlaybackSettings.PlaybackSpeed);
 			int RequiredSamples = Math.Max(Frame1 + 1, NextConsumedFrames) * Channels;
 
 			if (!FillSpeedBuffer(RequiredSamples))
@@ -121,7 +113,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 			}
 
 			OutputSamples += Channels;
-			SpeedPosition += PlaybackSpeed;
+			SpeedPosition += PlaybackSettings.PlaybackSpeed;
 
 			int ConsumedFrames = (int)SpeedPosition;
 			if (ConsumedFrames > 0)

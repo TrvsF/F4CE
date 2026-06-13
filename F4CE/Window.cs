@@ -49,7 +49,7 @@ internal class Window : GameWindow
 		ImguiImplOpenGL3.Init();
 
 		//////////////////////////////////////////////////
-		SetupPlaybacks();
+		CreateBasePlaybacks();
 	}
 
 	protected override void OnRenderFrame(FrameEventArgs EventArgs)
@@ -81,9 +81,26 @@ internal class Window : GameWindow
 		SwapBuffers();
 	}
 
-	private readonly List<OAudioPlayback> StoredPlaybacks = new();
+	public void OnClosed()
+	{
+		ImguiImplOpenGL3.Shutdown();
+		ImguiImplOpenTK4.Shutdown();
+	}
+	
+	// HACKy HACK HACK : the proper way 2 do this is probably GAY!
+	private static readonly List<OAudioPlayback> StoredPlaybacks = new();
 
-	private void SetupPlaybacks(int PlaybackCount = 4)
+	public static void AddPlayback(OAudioPlayback AudioPlayback)
+	{
+		StoredPlaybacks.Add(AudioPlayback);
+	}
+
+	public static void RemovePlayback(OAudioPlayback AudioPlayback)
+	{
+		StoredPlaybacks.RemoveAt(StoredPlaybacks.IndexOf(AudioPlayback));
+	}
+
+	private static void CreateBasePlaybacks(int PlaybackCount = 4)
 	{
 		for (int Playback = 0; Playback < PlaybackCount; ++Playback)
 		{
@@ -95,8 +112,9 @@ internal class Window : GameWindow
 	{
 		ImGui.Begin("main");
 
-		foreach (var StoredPlayback in StoredPlaybacks)
+		for (int PlaybackIndex = 0; PlaybackIndex < StoredPlaybacks.Count; ++PlaybackIndex)
 		{
+			var StoredPlayback = StoredPlaybacks[PlaybackIndex];
 			StoredPlayback.DrawBlock();
 		}
 
@@ -108,11 +126,6 @@ internal class Window : GameWindow
 		ImGui.End();
 	}
 
-	public void OnClosed()
-	{
-		ImguiImplOpenGL3.Shutdown();
-		ImguiImplOpenTK4.Shutdown();
-	}
 
 	public static void DrawWaveform(float[] Samples, Vector2 Size)
 	{
@@ -135,7 +148,7 @@ internal class Window : GameWindow
 		}
 	}
 
-	private void SaveAllPlaybacksToFile()
+	private static void SaveAllPlaybacksToFile()
 	{
 		if (StoredPlaybacks.Count == 0)
 		{
@@ -145,36 +158,55 @@ internal class Window : GameWindow
 		string DesktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
 		string Path = System.IO.Path.Combine(DesktopPath, "F4CE.wav");
 
+		int SaveCounter = 1337;
+		while (File.Exists(Path))
+		{
+			Path = System.IO.Path.Combine(DesktopPath, $"F4CE-{SaveCounter}.wav");
+			++SaveCounter;
+		}
+
 		List<ISampleProvider> RenderedProviders = new();
 
 		foreach (var Playback in StoredPlaybacks)
 		{
-			if (Playback.MemoryStream.Length == 0)
+			if (Playback.HasRecording)
 			{
-				continue;
+				MemoryStream CopyStream = new(Playback.MemoryStream.ToArray());
+				WaveFileReader Reader = new(CopyStream);
+				ISampleProvider BaseProvider = Reader.ToSampleProvider();
+
+				OSampleProviderOne Shifted = new(BaseProvider)
+				{
+					Duration = Playback.Length,
+					PlaybackSettings = Playback.PlaybackSettings,
+				};
+
+				RenderedProviders.Add(Shifted);
 			}
 
-			MemoryStream CopyStream = new(Playback.MemoryStream.ToArray());
-			WaveFileReader Reader = new(CopyStream);
-
-			ISampleProvider BaseProvider = Reader.ToSampleProvider();
-
-			OSampleProviderOne Shifted = new(BaseProvider)
+			foreach (var (Child, EmplaceTime) in Playback.GetChildren())
 			{
-				Duration = Playback.Length,
+				if (Child.MemoryStream.Length == 0)
+				{
+					continue;
+				}
 
-				// TODO : these should not come from here
-				Raw = Playback.Raw,
-				Rs = Playback.Rs,
-				PanSpeed = Playback.PanSpeed,
-				TransposeSemitones = Playback.Transpose,
-				WaveExpression = Playback.WaveExpression,
-				PlaybackSpeed = Playback.PlaybackSpeed,
-				Loudness = Playback.Loudness,
-				PanBaseVolume = Playback.PanBaseVolume,
-			};
+				MemoryStream ChildCopyStream = new(Child.MemoryStream.ToArray());
+				WaveFileReader ChildReader = new(ChildCopyStream);
+				ISampleProvider ChildBaseProvider = ChildReader.ToSampleProvider();
 
-			RenderedProviders.Add(Shifted);
+				OSampleProviderOne ChildShifted = new(ChildBaseProvider)
+				{
+					Duration = Child.Length,
+					PlaybackSettings = Child.PlaybackSettings,
+				};
+
+				ISampleProvider PositionedChild = EmplaceTime > TimeSpan.Zero
+					? new OffsetSampleProvider(ChildShifted) { DelayBy = EmplaceTime }
+					: ChildShifted;
+
+				RenderedProviders.Add(PositionedChild);
+			}
 		}
 
 		if (RenderedProviders.Count == 0)
@@ -186,8 +218,7 @@ internal class Window : GameWindow
 		Mixer.ReadFully = false;
 
 		WaveFormat Format = Mixer.WaveFormat;
-
-		using WaveFileWriter Writer = new WaveFileWriter(Path, Format);
+		using WaveFileWriter Writer = new(Path, Format);
 
 		float[] Buffer = new float[1024];
 		int Read;

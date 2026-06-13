@@ -6,21 +6,21 @@ namespace F4CE.Objects;
 
 internal partial class OSampleProviderOne : ISampleProvider
 {
-	public bool IsExpressionValid => CachedGoodExpression == WaveExpression;
+	public bool IsExpressionValid => CachedGoodExpression == PlaybackSettings.WaveExpression;
 	private string CachedGoodExpression = "";
 	private string CachedBadExpression = "";
 	private Expression Expression = null;
 
 	private float EvaluateWave(float Frequency, float Time)
 	{
-		if (CachedGoodExpression == WaveExpression || CachedBadExpression == WaveExpression)
+		if (CachedGoodExpression == PlaybackSettings.WaveExpression || CachedBadExpression == PlaybackSettings.WaveExpression)
 		{
 			Expression.Parameters["f"] = Frequency;
 			Expression.Parameters["t"] = Time;
 			return Convert.ToSingle(Expression.Evaluate());
 		}
 
-		var NewExpression = new Expression(WaveExpression);
+		var NewExpression = new Expression(PlaybackSettings.WaveExpression);
 
 		NewExpression.Parameters["f"] = Frequency;
 		NewExpression.Parameters["t"] = Time;
@@ -64,14 +64,14 @@ internal partial class OSampleProviderOne : ISampleProvider
 				return Frequency;
 			}
 
-			CachedBadExpression = WaveExpression;
+			CachedBadExpression = PlaybackSettings.WaveExpression;
 			Expression.Parameters["f"] = Frequency;
 			Expression.Parameters["t"] = Time;
 			return Convert.ToSingle(Expression.Evaluate());
 		}
 
 		Expression = NewExpression;
-		CachedGoodExpression = WaveExpression;
+		CachedGoodExpression = PlaybackSettings.WaveExpression;
 		return Convert.ToSingle(Expression.Evaluate());
 	}
 }

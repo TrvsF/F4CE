@@ -94,26 +94,9 @@ internal partial class OAudioPlayback
 	private OSampleProviderOne OProvider;
 	public bool IsInputValid { get => OProvider != null && !OProvider.IsExpressionValid; }
 
-	public void SetProviderSettings()
-	{
-		if (OProvider == null)
-		{
-			return;
-		}
-
-		OProvider.Raw = Raw;
-		OProvider.Rs = Rs;
-		OProvider.PanSpeed = PanSpeed;
-		OProvider.TransposeSemitones = Transpose;
-		OProvider.WaveExpression = WaveExpression;
-		OProvider.PlaybackSpeed = PlaybackSpeed;
-		OProvider.Loudness = Loudness;
-		OProvider.PanBaseVolume = PanBaseVolume;
-	}
-
 	public void PlayRecording()
 	{
-		if (MemoryStream.Length == 0)
+		if (MemoryStream.Length == 0 && Children.Count == 0)
 		{
 			Console.WriteLine("Nothing to play!");
 			return;
@@ -121,27 +104,79 @@ internal partial class OAudioPlayback
 
 		StopPlayback();
 
-		MemoryStream.Seek(0, SeekOrigin.Begin);
+		List<IDisposable> Disposables = new();
+		List<ISampleProvider> MixInputs = new();
 
-		MemoryStream PlaybackStream = new(MemoryStream.ToArray());
-		WaveFileReader PlaybackReader = new(PlaybackStream);
-
-		ISampleProvider Provider = PlaybackReader.ToSampleProvider();
-
-		OProvider = new OSampleProviderOne(Provider)
+		if (MemoryStream.Length > 0)
 		{
-			Duration = MemoryStream.Length,
-		};
-		SetProviderSettings();
+			MemoryStream.Seek(0, SeekOrigin.Begin);
+
+			MemoryStream PlaybackStream = new(MemoryStream.ToArray());
+			WaveFileReader PlaybackReader = new(PlaybackStream);
+
+			ISampleProvider Provider = PlaybackReader.ToSampleProvider();
+
+			OProvider = new OSampleProviderOne(Provider)
+			{
+				Duration = MemoryStream.Length,
+				PlaybackSettings = PlaybackSettings,
+			};
+
+			Disposables.Add(PlaybackReader);
+			Disposables.Add(PlaybackStream);
+			MixInputs.Add(OProvider);
+		}
+
+		foreach (var (Child, EmplaceTime) in Children)
+		{
+			if (Child.MemoryStream.Length == 0)
+			{
+				continue;
+			}
+
+			Child.MemoryStream.Position = 0;
+
+			MemoryStream ChildStream = new(Child.MemoryStream.ToArray());
+			WaveFileReader ChildReader = new(ChildStream);
+
+			ISampleProvider ChildSampleProvider = ChildReader.ToSampleProvider();
+
+			Child.OProvider = new OSampleProviderOne(ChildSampleProvider)
+			{
+				Duration = Child.MemoryStream.Length,
+				PlaybackSettings = Child.PlaybackSettings,
+			};
+
+			ISampleProvider PositionedProvider = EmplaceTime > TimeSpan.Zero
+				? new OffsetSampleProvider(Child.OProvider) { DelayBy = EmplaceTime }
+				: Child.OProvider;
+
+			Child.IsPlaying = true;
+
+			Disposables.Add(ChildReader);
+			Disposables.Add(ChildStream);
+			MixInputs.Add(PositionedProvider);
+		}
+
+		if (MixInputs.Count == 0)
+		{
+			Console.WriteLine("Nothing to play!");
+			return;
+		}
+
+		ISampleProvider FinalProvider = MixInputs.Count == 1
+			? MixInputs[0]
+			: new MixingSampleProvider(MixInputs) { ReadFully = false };
 
 		WaveOut = new WaveOutEvent();
-
-		WaveOut.Init(OProvider);
+		WaveOut.Init(FinalProvider);
 
 		WaveOut.PlaybackStopped += (Sender, Args) =>
 		{
-			PlaybackReader.Dispose();
-			PlaybackStream.Dispose();
+			foreach (IDisposable Disposable in Disposables)
+			{
+				Disposable.Dispose();
+			}
 
 			OnPlaybackStopped(Sender, Args);
 		};
@@ -167,6 +202,43 @@ internal partial class OAudioPlayback
 
 		OProvider = null;
 		IsPlaying = false;
+
+		foreach (var (Child, _) in Children)
+		{
+			Child.OProvider = null;
+			Child.IsPlaying = false;
+		}
+	}
+
+	public void RefreshSettings()
+	{
+		if (OProvider != null)
+		{
+			OProvider.PlaybackSettings = PlaybackSettings;
+		}
+
+		foreach (var (Child, _) in Children)
+		{
+			Child.RefreshSettings();
+		}
+	}
+
+	public TimeSpan GetDuration() // TODO : cache
+	{
+		if (MemoryStream.Length == 0)
+		{
+			return TimeSpan.Zero;
+		}
+
+		long CachedPos = MemoryStream.Position;
+
+		MemoryStream.Position = 0;
+		using WaveFileReader TempReader = new(new IgnoreDisposeStream(MemoryStream));
+
+		TimeSpan Duration = TempReader.TotalTime;
+		MemoryStream.Position = CachedPos;
+
+		return Duration * PlaybackSettings.PlaybackSpeed;
 	}
 
 	public static OAudioPlayback CombinePlaybacks(IEnumerable<OAudioPlayback> InPlaybacks)
@@ -199,6 +271,32 @@ internal partial class OAudioPlayback
 		CombinedPlayback.MemoryStream.Position = 0;
 
 		return CombinedPlayback;
+	}
+
+	public event Action<OAudioPlayback, TimeSpan> MergeRequested;
+	public bool IsChild { get; init; } = false;
+
+	private readonly List<(OAudioPlayback Playback, TimeSpan EmplaceTime)> Children = new();
+	public IReadOnlyList<(OAudioPlayback Playback, TimeSpan EmplaceTime)> GetChildren() => Children;
+
+	public void RequestAddition(OAudioPlayback Child, TimeSpan EmplaceTime)
+	{
+		Window.RemovePlayback(Child);
+
+		Children.RemoveAll(C => C.Playback == Child);
+		Children.Add((Child, EmplaceTime));
+	}
+
+	public bool RemoveAddition(OAudioPlayback Child)
+	{
+		int RemovedCount = Children.RemoveAll(C => C.Playback == Child);
+
+		if (RemovedCount > 0)
+		{
+			return true;
+		}
+
+		return false;
 	}
 
 	public float[] GetWaveform(int SampleCount = 512, float Sensitivity = 1.0f)
