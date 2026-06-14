@@ -8,7 +8,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 {
 	private readonly ISampleProvider Source;
 
-	public long Duration { get; init; }
+	public long BaseDuration { get; init; }
 	public FPlaybackSettings PlaybackSettings { get; set; }
 
 	public WaveFormat WaveFormat => Source.WaveFormat;

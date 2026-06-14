@@ -87,8 +87,7 @@ internal class Window : GameWindow
 		ImguiImplOpenTK4.Shutdown();
 	}
 	
-	// HACKy HACK HACK : the proper way 2 do this is probably GAY!
-	private static readonly List<OAudioPlayback> StoredPlaybacks = new();
+	public static readonly List<OAudioPlayback> StoredPlaybacks = new();
 
 	public static void AddPlayback(OAudioPlayback AudioPlayback)
 	{
@@ -108,7 +107,7 @@ internal class Window : GameWindow
 		}
 	}
 
-	private void DrawMainImgui()
+	private static void DrawMainImgui()
 	{
 		ImGui.Begin("main");
 
@@ -116,11 +115,14 @@ internal class Window : GameWindow
 		{
 			var StoredPlayback = StoredPlaybacks[PlaybackIndex];
 			StoredPlayback.DrawBlock();
+			ImGui.NewLine();
+			ImGui.NewLine();
+			ImGui.NewLine();
 		}
-
+		ImGui.NewLine();
 		if (ImGui.Button("Save All Playbacks (Render)", new Vector2(260, 30)))
 		{
-			SaveAllPlaybacksToFile();
+			OAudioPlayback.SaveAllPlaybacksToFile();
 		}
 
 		ImGui.End();
@@ -146,89 +148,6 @@ internal class Window : GameWindow
 
 			DrawList.AddLine(new Vector2(X1, Y1), new Vector2(X2, Y2), ImGui.GetColorU32(ImGuiCol.PlotLines), 1.5f);
 		}
-	}
-
-	private static void SaveAllPlaybacksToFile()
-	{
-		if (StoredPlaybacks.Count == 0)
-		{
-			return;
-		}
-
-		string DesktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-		string Path = System.IO.Path.Combine(DesktopPath, "F4CE.wav");
-
-		int SaveCounter = 1337;
-		while (File.Exists(Path))
-		{
-			Path = System.IO.Path.Combine(DesktopPath, $"F4CE-{SaveCounter}.wav");
-			++SaveCounter;
-		}
-
-		List<ISampleProvider> RenderedProviders = new();
-
-		foreach (var Playback in StoredPlaybacks)
-		{
-			if (Playback.HasRecording)
-			{
-				MemoryStream CopyStream = new(Playback.MemoryStream.ToArray());
-				WaveFileReader Reader = new(CopyStream);
-				ISampleProvider BaseProvider = Reader.ToSampleProvider();
-
-				OSampleProviderOne Shifted = new(BaseProvider)
-				{
-					Duration = Playback.Length,
-					PlaybackSettings = Playback.PlaybackSettings,
-				};
-
-				RenderedProviders.Add(Shifted);
-			}
-
-			foreach (var (Child, EmplaceTime) in Playback.GetChildren())
-			{
-				if (Child.MemoryStream.Length == 0)
-				{
-					continue;
-				}
-
-				MemoryStream ChildCopyStream = new(Child.MemoryStream.ToArray());
-				WaveFileReader ChildReader = new(ChildCopyStream);
-				ISampleProvider ChildBaseProvider = ChildReader.ToSampleProvider();
-
-				OSampleProviderOne ChildShifted = new(ChildBaseProvider)
-				{
-					Duration = Child.Length,
-					PlaybackSettings = Child.PlaybackSettings,
-				};
-
-				ISampleProvider PositionedChild = EmplaceTime > TimeSpan.Zero
-					? new OffsetSampleProvider(ChildShifted) { DelayBy = EmplaceTime }
-					: ChildShifted;
-
-				RenderedProviders.Add(PositionedChild);
-			}
-		}
-
-		if (RenderedProviders.Count == 0)
-		{
-			return;
-		}
-
-		MixingSampleProvider Mixer = new(RenderedProviders);
-		Mixer.ReadFully = false;
-
-		WaveFormat Format = Mixer.WaveFormat;
-		using WaveFileWriter Writer = new(Path, Format);
-
-		float[] Buffer = new float[1024];
-		int Read;
-
-		while ((Read = Mixer.Read(Buffer, 0, Buffer.Length)) > 0)
-		{
-			Writer.WriteSamples(Buffer, 0, Read);
-		}
-
-		Writer.Flush();
 	}
 
 	public readonly static DebugProc DebugProcCallback = Window_DebugProc;

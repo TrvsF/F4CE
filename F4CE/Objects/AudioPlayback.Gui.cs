@@ -65,8 +65,8 @@ internal partial class OAudioPlayback
 				MemoryStream.SetLength(0);
 			}
 
-			ImGui.NewLine();
-			ImGui.NewLine();
+			ImGui.Text($"{Children.Count}kidz");
+			ImGui.SameLine();
 
 			if (!IsPlaying)
 			{
@@ -82,8 +82,6 @@ internal partial class OAudioPlayback
 					StopPlayback();
 				}
 			}
-			ImGui.SameLine();
-			ImGui.Text($"{GetDuration().TotalSeconds}s");
 			ImGui.SameLine();
 			ImGui.Checkbox("Raw", ref PlaybackSettings.Raw);
 			ImGui.SameLine();
@@ -110,6 +108,8 @@ internal partial class OAudioPlayback
 			ImGui.SetNextItemWidth(80);
 			ImGui.SliderFloat("PanBaseVolume", ref PlaybackSettings.PanBaseVolume, 0f, 1f);
 			ImGui.SameLine();
+			ImGui.Text($"{GetTotalDuration().TotalSeconds}s");
+			ImGui.SameLine();
 
 			//if (IsInputValid)
 			//{
@@ -117,20 +117,67 @@ internal partial class OAudioPlayback
 			//}
 			ImGui.SetNextItemWidth(320);
 			ImGui.InputText("Expression", ref PlaybackSettings.WaveExpression, 1024);
-			ImGui.SameLine();
 			//if (IsInputValid)
 			//{
 			//	ImGui.PopStyleColor();
 			//}
 
-			//float[] Waveform = GetWaveform(480, 3.0f);
-			//Window.DrawWaveform(Waveform, new Vector2(480, 80));
+			if (!IsRecording)
+			{
+				const float PixelsPerSecond = 20f;
+				const float MainHeight = 40f;
+				const float ChildHeight = 28f;
+				const float ChildGap = 4f;
+
+				var DrawList = ImGui.GetWindowDrawList();
+				var TimelineOrigin = ImGui.GetCursorScreenPos();
+				var TotalWidth = PixelsPerSecond * (float)GetTotalDuration().TotalSeconds;
+
+				var MainColour = ImGui.GetColorU32(new Vector4(0.20f, 0.55f, 0.95f, 1.0f));
+				DrawList.AddRectFilled(TimelineOrigin, TimelineOrigin + new Vector2(TotalWidth, MainHeight), MainColour);
+
+				var ChildColour = ImGui.GetColorU32(new Vector4(0.25f, 0.72f, 0.45f, 1.0f));
+				float ChildRowY = TimelineOrigin.Y + MainHeight + ChildGap;
+
+				float ChildOffsetY = 0f;
+				foreach (var (Child, EmplaceTime) in Children)
+				{
+					if (!Child.HasRecording)
+					{
+						continue;
+					}
+
+					float ChildStartX = TimelineOrigin.X + PixelsPerSecond * (float)EmplaceTime.TotalSeconds;
+					float ChildWidth = PixelsPerSecond * (float)Child.GetTotalDuration().TotalSeconds;
+
+					var ChildPos = new Vector2(ChildStartX, ChildRowY + ChildOffsetY);
+					DrawList.AddRectFilled(ChildPos, ChildPos + new Vector2(ChildWidth, ChildHeight), ChildColour);
+					ChildOffsetY += ChildHeight + ChildGap;
+				}
+
+				float TotalHeight = MainHeight + ChildOffsetY;
+
+				if (IsPlaying)
+				{
+					float CursorX = TimelineOrigin.X + float.Lerp(0f, TotalWidth, PlaybackProgress);
+					var CursorPos = new Vector2(CursorX, TimelineOrigin.Y);
+					DrawList.AddRectFilled(CursorPos, CursorPos + new Vector2(3f, TotalHeight), ImGui.GetColorU32(new Vector4(1f, 0f, 0f, 1.0f)));
+				}
+
+				ImGui.Dummy(new Vector2(TotalWidth, TotalHeight));
+			}
+
+			foreach (var (_, _) in Children)
+			{
+				ImGui.NewLine();
+			}
 
 			RefreshSettings();
 		}
 
 		if (IsChild)
 		{
+			ImGui.NewLine();
 			if (ImGui.Button("Beam me UP"))
 			{
 				MergeRequested.Invoke(this, TimeSpan.FromSeconds(5));

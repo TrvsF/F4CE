@@ -3,6 +3,7 @@ using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 
 namespace F4CE.Objects;
@@ -13,7 +14,23 @@ internal partial class OAudioPlayback
 
 	public bool IsRecording { get; private set; } = false;
 	public bool IsPlaying { get; private set; } = false;
-	public long Length { get => MemoryStream.Length; }
+	public long BaseLength { get => MemoryStream.Length; }
+
+	public float PlaybackProgress
+	{
+		get
+		{
+			if (!IsPlaying || CachedTotalDuration == TimeSpan.Zero)
+			{
+				return 0f;
+			}
+
+			return (float)Math.Clamp(PlaybackStopwatch.Elapsed.TotalSeconds / CachedTotalDuration.TotalSeconds, 0f, 1f);
+		}
+	}
+
+	private TimeSpan CachedTotalDuration = TimeSpan.Zero;
+	private readonly Stopwatch PlaybackStopwatch = new();
 
 	private WaveInEvent WaveIn;
 	private WaveFileWriter Writer;
@@ -118,7 +135,7 @@ internal partial class OAudioPlayback
 
 			OProvider = new OSampleProviderOne(Provider)
 			{
-				Duration = MemoryStream.Length,
+				BaseDuration = MemoryStream.Length,
 				PlaybackSettings = PlaybackSettings,
 			};
 
@@ -143,7 +160,7 @@ internal partial class OAudioPlayback
 
 			Child.OProvider = new OSampleProviderOne(ChildSampleProvider)
 			{
-				Duration = Child.MemoryStream.Length,
+				BaseDuration = Child.MemoryStream.Length,
 				PlaybackSettings = Child.PlaybackSettings,
 			};
 
@@ -171,6 +188,9 @@ internal partial class OAudioPlayback
 		WaveOut = new WaveOutEvent();
 		WaveOut.Init(FinalProvider);
 
+		// Cache now so PlaybackProgress queries are cheap and consistent mid-playback.
+		CachedTotalDuration = GetTotalDuration();
+
 		WaveOut.PlaybackStopped += (Sender, Args) =>
 		{
 			foreach (IDisposable Disposable in Disposables)
@@ -182,6 +202,7 @@ internal partial class OAudioPlayback
 		};
 
 		WaveOut.Play();
+		PlaybackStopwatch.Restart();
 
 		IsPlaying = true;
 	}
@@ -202,6 +223,8 @@ internal partial class OAudioPlayback
 
 		OProvider = null;
 		IsPlaying = false;
+		CachedTotalDuration = TimeSpan.Zero;
+		PlaybackStopwatch.Stop();
 
 		foreach (var (Child, _) in Children)
 		{
@@ -223,7 +246,7 @@ internal partial class OAudioPlayback
 		}
 	}
 
-	public TimeSpan GetDuration() // TODO : cache
+	private TimeSpan GetBaseDuration()
 	{
 		if (MemoryStream.Length == 0)
 		{
@@ -238,7 +261,24 @@ internal partial class OAudioPlayback
 		TimeSpan Duration = TempReader.TotalTime;
 		MemoryStream.Position = CachedPos;
 
-		return Duration * PlaybackSettings.PlaybackSpeed;
+		return Duration / PlaybackSettings.PlaybackSpeed;
+	}
+
+	public TimeSpan GetTotalDuration()
+	{
+		TimeSpan Latest = GetBaseDuration();
+
+		foreach (var (Child, EmplaceTime) in Children)
+		{
+			TimeSpan ChildEnd = EmplaceTime + Child.GetBaseDuration();
+
+			if (ChildEnd > Latest)
+			{
+				Latest = ChildEnd;
+			}
+		}
+
+		return Latest;
 	}
 
 	public static OAudioPlayback CombinePlaybacks(IEnumerable<OAudioPlayback> InPlaybacks)
@@ -299,67 +339,87 @@ internal partial class OAudioPlayback
 		return false;
 	}
 
-	public float[] GetWaveform(int SampleCount = 512, float Sensitivity = 1.0f)
+	public static void SaveAllPlaybacksToFile()
 	{
-		if (MemoryStream.Length == 0)
+		if (Window.StoredPlaybacks.Count == 0)
 		{
-			return [];
+			return;
 		}
 
-		long OldPos = MemoryStream.Position;
-		MemoryStream.Position = 0;
+		string DesktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+		string Path = System.IO.Path.Combine(DesktopPath, "F4CE.wav");
 
-		using WaveFileReader Reader = new(MemoryStream);
-
-		ISampleProvider Provider = Reader.ToSampleProvider();
-
-		List<float> Samples = new();
-		float[] Buffer = new float[1024];
-
-		int Read;
-		while ((Read = Provider.Read(Buffer, 0, Buffer.Length)) > 0)
+		int SaveCounter = 1337;
+		while (File.Exists(Path))
 		{
-			for (int ReadIndex = 0; ReadIndex < Read; ReadIndex++)
+			Path = System.IO.Path.Combine(DesktopPath, $"F4CE-{SaveCounter}.wav");
+			++SaveCounter;
+		}
+
+		List<ISampleProvider> RenderedProviders = new();
+
+		foreach (var Playback in Window.StoredPlaybacks)
+		{
+			if (Playback.HasRecording)
 			{
-				float Sample = Buffer[ReadIndex] * Sensitivity;
+				MemoryStream CopyStream = new(Playback.MemoryStream.ToArray());
+				WaveFileReader Reader = new(CopyStream);
+				ISampleProvider BaseProvider = Reader.ToSampleProvider();
 
-				Sample = Math.Clamp(Sample, -1f, 1f);
-
-				Samples.Add(Sample);
-			}
-		}
-
-		MemoryStream.Position = OldPos;
-
-		if (Samples.Count == 0)
-		{
-			return [];
-		}
-
-		float[] Result = new float[SampleCount];
-
-		float Stride = (float)Samples.Count / SampleCount;
-
-		for (int i = 0; i < SampleCount; i++)
-		{
-			int Start = (int)(i * Stride);
-			int End = Math.Min((int)((i + 1) * Stride), Samples.Count);
-
-			float Peak = 0f;
-
-			for (int j = Start; j < End; j++)
-			{
-				float Abs = Math.Abs(Samples[j]);
-
-				if (Abs > Peak)
+				OSampleProviderOne Shifted = new(BaseProvider)
 				{
-					Peak = Abs;
-				}
+					BaseDuration = Playback.MemoryStream.Length,
+					PlaybackSettings = Playback.PlaybackSettings,
+				};
+
+				RenderedProviders.Add(Shifted);
 			}
 
-			Result[i] = Peak;
+			foreach (var (Child, EmplaceTime) in Playback.GetChildren())
+			{
+				if (Child.MemoryStream.Length == 0)
+				{
+					continue;
+				}
+
+				MemoryStream ChildCopyStream = new(Child.MemoryStream.ToArray());
+				WaveFileReader ChildReader = new(ChildCopyStream);
+				ISampleProvider ChildBaseProvider = ChildReader.ToSampleProvider();
+
+				OSampleProviderOne ChildShifted = new(ChildBaseProvider)
+				{
+					BaseDuration = Child.MemoryStream.Length,
+					PlaybackSettings = Child.PlaybackSettings,
+				};
+
+				ISampleProvider PositionedChild = EmplaceTime > TimeSpan.Zero
+					? new OffsetSampleProvider(ChildShifted) { DelayBy = EmplaceTime }
+					: ChildShifted;
+
+				RenderedProviders.Add(PositionedChild);
+			}
 		}
 
-		return Result;
+		if (RenderedProviders.Count == 0)
+		{
+			return;
+		}
+
+		MixingSampleProvider Mixer = new(RenderedProviders);
+		Mixer.ReadFully = false;
+
+		WaveFormat Format = Mixer.WaveFormat;
+		using WaveFileWriter Writer = new(Path, Format);
+
+		float[] Buffer = new float[1024];
+		int Read;
+
+		while ((Read = Mixer.Read(Buffer, 0, Buffer.Length)) > 0)
+		{
+			Writer.WriteSamples(Buffer, 0, Read);
+		}
+
+		Writer.Flush();
 	}
+
 }
