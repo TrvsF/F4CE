@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 
 namespace F4CE.Objects;
 
@@ -12,8 +13,11 @@ internal partial class OAudioPlayback
 {
 	public MemoryStream MemoryStream { get; } = new();
 
+	public FPlaybackSettings PlaybackSettings { get; private set; } = new();
 	public bool IsRecording { get; private set; } = false;
 	public bool IsPlaying { get; private set; } = false;
+
+	public bool HasRecording { get => MemoryStream.Length > 0 && !IsRecording; }
 	public long BaseLength { get => MemoryStream.Length; }
 
 	public float PlaybackProgress
@@ -29,8 +33,8 @@ internal partial class OAudioPlayback
 		}
 	}
 
-	private TimeSpan CachedTotalDuration = TimeSpan.Zero;
 	private readonly Stopwatch PlaybackStopwatch = new();
+	private TimeSpan CachedTotalDuration = TimeSpan.Zero;
 
 	private WaveInEvent WaveIn;
 	private WaveFileWriter Writer;
@@ -77,7 +81,7 @@ internal partial class OAudioPlayback
 			WaveFormat = new WaveFormat(44100, 2)
 		};
 
-		Writer = new WaveFileWriter(MemoryStream, WaveIn.WaveFormat);
+		Writer = new WaveFileWriter(new IgnoreDisposeStream(MemoryStream), WaveIn.WaveFormat);
 
 		WaveIn.RecordingStopped += OnRecordingStopped;
 		WaveIn.DataAvailable += OnDataAvailable;
@@ -94,9 +98,10 @@ internal partial class OAudioPlayback
 
 	private void OnRecordingStopped(object Sender, StoppedEventArgs Args)
 	{
-		Writer.Flush();
+		Writer.Dispose();
+		Writer = null;
 		WaveIn.Dispose();
-
+		WaveIn = null;
 		IsRecording = false;
 	}
 
@@ -187,23 +192,24 @@ internal partial class OAudioPlayback
 
 		WaveOut = new WaveOutEvent();
 		WaveOut.Init(FinalProvider);
-
-		// Cache now so PlaybackProgress queries are cheap and consistent mid-playback.
 		CachedTotalDuration = GetTotalDuration();
 
-		WaveOut.PlaybackStopped += (Sender, Args) =>
+		WaveOutEvent CapturedOut = WaveOut;
+
+		CapturedOut.PlaybackStopped += (Sender, Args) =>
 		{
 			foreach (IDisposable Disposable in Disposables)
-			{
 				Disposable.Dispose();
-			}
 
-			OnPlaybackStopped(Sender, Args);
+			_ = Task.Run(() =>
+			{
+				CapturedOut.Dispose();
+				OnPlaybackStopped(Sender, Args);
+			});
 		};
 
-		WaveOut.Play();
+		CapturedOut.Play();
 		PlaybackStopwatch.Restart();
-
 		IsPlaying = true;
 	}
 
@@ -218,8 +224,7 @@ internal partial class OAudioPlayback
 		Reader?.Dispose();
 		Reader = null;
 
-		WaveOut?.Dispose();
-		WaveOut = null;
+		WaveOut = null; // already disposed by the PlaybackStopped
 
 		OProvider = null;
 		IsPlaying = false;
@@ -279,38 +284,6 @@ internal partial class OAudioPlayback
 		}
 
 		return Latest;
-	}
-
-	public static OAudioPlayback CombinePlaybacks(IEnumerable<OAudioPlayback> InPlaybacks)
-	{
-		List<ISampleProvider> Providers = new();
-
-		foreach (var Playback in InPlaybacks)
-		{
-			if (Playback.MemoryStream.Length == 0)
-			{
-				continue;
-			}
-
-			Playback.MemoryStream.Position = 0;
-
-			WaveFileReader Reader = new(Playback.MemoryStream);
-			Providers.Add(Reader.ToSampleProvider());
-		}
-
-		OAudioPlayback CombinedPlayback = new();
-
-		if (Providers.Count == 0)
-		{
-			return CombinedPlayback;
-		}
-
-		ConcatenatingSampleProvider ConcatenatedProvider = new(Providers);
-		WaveFileWriter.WriteWavFileToStream(CombinedPlayback.MemoryStream, ConcatenatedProvider.ToWaveProvider());
-
-		CombinedPlayback.MemoryStream.Position = 0;
-
-		return CombinedPlayback;
 	}
 
 	public event Action<OAudioPlayback, TimeSpan> MergeRequested;
@@ -377,7 +350,7 @@ internal partial class OAudioPlayback
 
 			foreach (var (Child, EmplaceTime) in Playback.GetChildren())
 			{
-				if (Child.MemoryStream.Length == 0)
+				if (!Child.HasRecording)
 				{
 					continue;
 				}
@@ -421,5 +394,4 @@ internal partial class OAudioPlayback
 
 		Writer.Flush();
 	}
-
 }

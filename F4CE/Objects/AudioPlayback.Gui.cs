@@ -20,10 +20,7 @@ public record FPlaybackSettings
 
 internal partial class OAudioPlayback
 {
-	public FPlaybackSettings PlaybackSettings { get; private set; } = new();
-	public bool HasRecording { get => MemoryStream.Length > 0 && !IsRecording; }
-
-	private readonly Guid ImGuiD = Guid.NewGuid();
+	public readonly Guid ImGuiD = Guid.NewGuid();
 
 	public void DrawBlock()
 	{

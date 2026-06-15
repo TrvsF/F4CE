@@ -1,8 +1,6 @@
 ﻿using F4CE.Backends;
 using F4CE.Objects;
 using ImGuiNET;
-using NAudio.Wave;
-using NAudio.Wave.SampleProviders;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
@@ -81,14 +79,32 @@ internal class Window : GameWindow
 		SwapBuffers();
 	}
 
-	public void OnClosed()
+	public static void OnClosed()
 	{
+		Console.WriteLine($"Saving!");
+		string SavePath = Path.Combine(AppContext.BaseDirectory, "playbacks.bin");
+		OAudioPlayback.SaveListToFile(Window.StoredPlaybacks, SavePath);
+
 		ImguiImplOpenGL3.Shutdown();
 		ImguiImplOpenTK4.Shutdown();
 	}
 	
 	public static readonly List<OAudioPlayback> StoredPlaybacks = new();
 
+	private static void DrawPlaybacks()
+	{
+		string SavePath = Path.Combine(AppContext.BaseDirectory, "playbacks.bin");
+		List<OAudioPlayback> LoadedPlaybacks = OAudioPlayback.LoadListFromFile(SavePath);
+
+		foreach (var LoadedPlayback in LoadedPlaybacks)
+		{
+			if (ImGui.Button($"{LoadedPlayback.ImGuiD} {LoadedPlayback.GetTotalDuration()}"))
+			{
+				LoadedPlayback.PlayRecording();
+			}
+		}
+	}
+		
 	public static void AddPlayback(OAudioPlayback AudioPlayback)
 	{
 		StoredPlaybacks.Add(AudioPlayback);
@@ -124,79 +140,22 @@ internal class Window : GameWindow
 		{
 			OAudioPlayback.SaveAllPlaybacksToFile();
 		}
+		ImGui.NewLine();
+		DrawPlaybacks();
 
 		ImGui.End();
 	}
 
 
-	public static void DrawWaveform(float[] Samples, Vector2 Size)
-	{
-		ImDrawListPtr DrawList = ImGui.GetWindowDrawList();
-		Vector2 Pos = ImGui.GetCursorScreenPos();
-
-		ImGui.InvisibleButton($"Waveform", Size);
-
-		float MidY = Pos.Y + Size.Y * 0.5f;
-
-		for (int Sample = 1; Sample < Samples.Length; Sample++)
-		{
-			float X1 = Pos.X + ((Sample - 1) / (float)Samples.Length) * Size.X;
-			float X2 = Pos.X + (Sample / (float)Samples.Length) * Size.X;
-
-			float Y1 = MidY - Samples[Sample - 1] * Size.Y * 0.5f;
-			float Y2 = MidY - Samples[Sample] * Size.Y * 0.5f;
-
-			DrawList.AddLine(new Vector2(X1, Y1), new Vector2(X2, Y2), ImGui.GetColorU32(ImGuiCol.PlotLines), 1.5f);
-		}
-	}
-
 	public readonly static DebugProc DebugProcCallback = Window_DebugProc;
 	private static void Window_DebugProc(DebugSource Source, DebugType Type, int Id, DebugSeverity Severity, int Length, IntPtr PtrMessage, IntPtr PtrInt)
 	{
-		var ParsedMessage = Marshal.PtrToStringAnsi(PtrMessage, Length);
-		var ShowMessage = true;
-
-		switch (Source)
-		{
-			case DebugSource.DebugSourceApplication:
-				ShowMessage = false;
-				break;
-			case DebugSource.DontCare:
-			case DebugSource.DebugSourceApi:
-			case DebugSource.DebugSourceWindowSystem:
-			case DebugSource.DebugSourceShaderCompiler:
-			case DebugSource.DebugSourceThirdParty:
-			case DebugSource.DebugSourceOther:
-			default:
-				ShowMessage = true;
-				break;
-		}
-
-		if (!ShowMessage)
+		if (Source == DebugSource.DebugSourceApi)
 		{
 			return;
 		}
 
-		switch (Severity)
-		{
-			case DebugSeverity.DontCare:
-				Console.WriteLine($"[DontCare] [{Source}] {ParsedMessage}");
-				break;
-			case DebugSeverity.DebugSeverityHigh:
-				Console.Error.WriteLine($"Error: [{Source}] {ParsedMessage}");
-				break;
-			case DebugSeverity.DebugSeverityMedium:
-				Console.WriteLine($"Warning: [{Source}] {ParsedMessage}");
-				break;
-			case DebugSeverity.DebugSeverityLow:
-				Console.WriteLine($"Info: [{Source}] {ParsedMessage}");
-				break;
-			case DebugSeverity.DebugSeverityNotification:
-				//Console.WriteLine($"[Fuck THis] [{Source}] {ParsedMessage}");
-				break;
-			default:
-				Console.WriteLine($"[{Severity}] [{Source}] {ParsedMessage}");
-				break;
-		}
+		var ParsedMessage = Marshal.PtrToStringAnsi(PtrMessage, Length);
+		Console.WriteLine($"[{Source}] {ParsedMessage}");
 	}
 }
