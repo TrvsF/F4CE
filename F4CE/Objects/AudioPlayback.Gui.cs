@@ -69,7 +69,7 @@ internal partial class OAudioPlayback
 			{
 				if (ImGui.Button($"Play Recording", new Vector2(120, 20)))
 				{
-					PlayRecording();
+					StartPlayback();
 				}
 			}
 			else
@@ -185,6 +185,14 @@ internal partial class OAudioPlayback
 				Window.RemovePlayback(this);
 			}
 			ImGui.End();
+		}
+
+		if (ImGui.Button("save"))
+		{
+			if (!Window.StoredPlaybacks.Contains(this))
+			{
+				Window.StoredPlaybacks.Add(this);
+			}
 		}
 
 		ImGui.PopID();

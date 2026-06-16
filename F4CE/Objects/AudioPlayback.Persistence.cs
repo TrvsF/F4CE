@@ -12,11 +12,11 @@ internal partial class OAudioPlayback
 
 	public static void SaveListToFile(IReadOnlyList<OAudioPlayback> Playbacks, string FilePath)
 	{
-		CachedList = null;
-
 		string? Directory = Path.GetDirectoryName(FilePath);
 		if (!string.IsNullOrEmpty(Directory))
+		{
 			System.IO.Directory.CreateDirectory(Directory);
+		}
 
 		using FileStream Fs = new(FilePath, FileMode.Create, FileAccess.Write);
 		using BinaryWriter Bw = new(Fs);
@@ -25,34 +25,37 @@ internal partial class OAudioPlayback
 		Bw.Write(Playbacks.Count);
 
 		foreach (OAudioPlayback Playback in Playbacks)
+		{
 			WritePlayback(Bw, Playback);
+		}
 	}
 
-	private static List<OAudioPlayback>? CachedList = null;
 	public static List<OAudioPlayback> LoadListFromFile(string FilePath)
 	{
-		if (CachedList != null)
-			return CachedList;
-
 		if (!File.Exists(FilePath))
-			return CachedList = new();
-
-		using FileStream Fs = new(FilePath, FileMode.Open, FileAccess.Read);
-		using BinaryReader Br = new(Fs);
-
-		int Version = Br.ReadInt32();
-		if (Version != SerializationVersion)
 		{
-			throw new InvalidDataException($"Save file version {Version} is not supported by this build (expected {SerializationVersion}).");
+			return [];
 		}
 
-		int Count = Br.ReadInt32();
-		CachedList = new(Count);
+		using FileStream FileStream = new(FilePath, FileMode.Open, FileAccess.Read);
+		using BinaryReader BinaryReader = new(FileStream);
 
-		for (int I = 0; I < Count; I++)
-			CachedList.Add(ReadPlayback(Br, IsChild: false));
+		int Version = BinaryReader.ReadInt32();
+		if (Version != SerializationVersion)
+		{
+			throw new InvalidDataException(
+				$"Save file version {Version} is not supported by this build (expected {SerializationVersion}).");
+		}
 
-		return CachedList;
+		int ReadCount = BinaryReader.ReadInt32();
+		List<OAudioPlayback> Result = new(ReadCount);
+
+		for (int ReadIndex = 0; ReadIndex < ReadCount; ++ReadIndex)
+		{
+			Result.Add(ReadPlayback(BinaryReader, IsChild: false));
+		}
+
+		return Result;
 	}
 
 	private static void WritePlayback(BinaryWriter Bw, OAudioPlayback Playback)

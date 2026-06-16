@@ -7,6 +7,7 @@ using OpenTK.Windowing.Desktop;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 
@@ -16,6 +17,8 @@ internal class Window : GameWindow
 {
 	public Window() : base(GameWindowSettings.Default, new NativeWindowSettings() { ClientSize = new OpenTK.Mathematics.Vector2i(1280, 960), APIVersion = new Version(3, 3) })
 	{ }
+
+	private static readonly string SavePath = Path.Combine(AppContext.BaseDirectory, "playbacks.bin");
 
 	protected override void OnLoad()
 	{
@@ -48,6 +51,7 @@ internal class Window : GameWindow
 
 		//////////////////////////////////////////////////
 		CreateBasePlaybacks();
+		StoredPlaybacks.AddRange(OAudioPlayback.LoadListFromFile(SavePath));
 	}
 
 	protected override void OnRenderFrame(FrameEventArgs EventArgs)
@@ -82,44 +86,57 @@ internal class Window : GameWindow
 	public static void OnClosed()
 	{
 		Console.WriteLine($"Saving!");
-		string SavePath = Path.Combine(AppContext.BaseDirectory, "playbacks.bin");
-		OAudioPlayback.SaveListToFile(Window.StoredPlaybacks, SavePath);
+
+		OAudioPlayback.SaveListToFile(StoredPlaybacks, SavePath);
 
 		ImguiImplOpenGL3.Shutdown();
 		ImguiImplOpenTK4.Shutdown();
 	}
 	
+	public static readonly List<OAudioPlayback> RootPlaybacks = new();
 	public static readonly List<OAudioPlayback> StoredPlaybacks = new();
 
 	private static void DrawPlaybacks()
 	{
-		string SavePath = Path.Combine(AppContext.BaseDirectory, "playbacks.bin");
-		List<OAudioPlayback> LoadedPlaybacks = OAudioPlayback.LoadListFromFile(SavePath);
-
-		foreach (var LoadedPlayback in LoadedPlaybacks)
+		for (int PlaybackIndex = StoredPlaybacks.Count - 1; PlaybackIndex >= 0; --PlaybackIndex)
 		{
+			var LoadedPlayback = StoredPlaybacks[PlaybackIndex];
+			ImGui.PushID($"{LoadedPlayback.ImGuiD}");
 			if (ImGui.Button($"{LoadedPlayback.ImGuiD} {LoadedPlayback.GetTotalDuration()}"))
 			{
-				LoadedPlayback.PlayRecording();
+				if (LoadedPlayback.IsPlaying)
+				{
+					LoadedPlayback.StopPlayback();
+				}
+				else
+				{
+					LoadedPlayback.StartPlayback();
+				}
 			}
+			ImGui.SameLine();
+			if (ImGui.Button("delete"))
+			{
+				StoredPlaybacks.RemoveAt(PlaybackIndex);
+			}
+			ImGui.PopID();
 		}
 	}
 		
 	public static void AddPlayback(OAudioPlayback AudioPlayback)
 	{
-		StoredPlaybacks.Add(AudioPlayback);
+		RootPlaybacks.Add(AudioPlayback);
 	}
 
 	public static void RemovePlayback(OAudioPlayback AudioPlayback)
 	{
-		StoredPlaybacks.RemoveAt(StoredPlaybacks.IndexOf(AudioPlayback));
+		RootPlaybacks.RemoveAt(RootPlaybacks.IndexOf(AudioPlayback));
 	}
 
 	private static void CreateBasePlaybacks(int PlaybackCount = 4)
 	{
 		for (int Playback = 0; Playback < PlaybackCount; ++Playback)
 		{
-			StoredPlaybacks.Add(new());
+			RootPlaybacks.Add(new());
 		}
 	}
 
@@ -127,16 +144,16 @@ internal class Window : GameWindow
 	{
 		ImGui.Begin("main");
 
-		for (int PlaybackIndex = 0; PlaybackIndex < StoredPlaybacks.Count; ++PlaybackIndex)
+		for (int PlaybackIndex = 0; PlaybackIndex < RootPlaybacks.Count; ++PlaybackIndex)
 		{
-			var StoredPlayback = StoredPlaybacks[PlaybackIndex];
+			var StoredPlayback = RootPlaybacks[PlaybackIndex];
 			StoredPlayback.DrawBlock();
 			ImGui.NewLine();
 			ImGui.NewLine();
 			ImGui.NewLine();
 		}
 		ImGui.NewLine();
-		if (ImGui.Button("Save All Playbacks (Render)", new Vector2(260, 30)))
+		if (ImGui.Button("FOLLOW THAT CHUNE", new Vector2(260, 30)))
 		{
 			OAudioPlayback.SaveAllPlaybacksToFile();
 		}

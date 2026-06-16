@@ -116,7 +116,7 @@ internal partial class OAudioPlayback
 	private OSampleProviderOne OProvider;
 	public bool IsInputValid { get => OProvider != null && !OProvider.IsExpressionValid; }
 
-	public void PlayRecording()
+	public void StartPlayback()
 	{
 		if (MemoryStream.Length == 0 && Children.Count == 0)
 		{
@@ -194,21 +194,17 @@ internal partial class OAudioPlayback
 		WaveOut.Init(FinalProvider);
 		CachedTotalDuration = GetTotalDuration();
 
-		WaveOutEvent CapturedOut = WaveOut;
-
-		CapturedOut.PlaybackStopped += (Sender, Args) =>
+		WaveOut.PlaybackStopped += (Sender, Args) =>
 		{
 			foreach (IDisposable Disposable in Disposables)
-				Disposable.Dispose();
-
-			_ = Task.Run(() =>
 			{
-				CapturedOut.Dispose();
-				OnPlaybackStopped(Sender, Args);
-			});
+				Disposable.Dispose();
+			}
+
+			OnPlaybackStopped(Sender, Args);
 		};
 
-		CapturedOut.Play();
+		WaveOut.Play();
 		PlaybackStopwatch.Restart();
 		IsPlaying = true;
 	}
@@ -314,7 +310,7 @@ internal partial class OAudioPlayback
 
 	public static void SaveAllPlaybacksToFile()
 	{
-		if (Window.StoredPlaybacks.Count == 0)
+		if (Window.RootPlaybacks.Count == 0)
 		{
 			return;
 		}
@@ -331,7 +327,7 @@ internal partial class OAudioPlayback
 
 		List<ISampleProvider> RenderedProviders = new();
 
-		foreach (var Playback in Window.StoredPlaybacks)
+		foreach (var Playback in Window.RootPlaybacks)
 		{
 			if (Playback.HasRecording)
 			{
