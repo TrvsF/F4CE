@@ -93,7 +93,7 @@ internal class Window : GameWindow
 		ImguiImplOpenTK4.Shutdown();
 	}
 	
-	public static readonly List<OAudioPlayback> RootPlaybacks = new();
+	public static readonly List<OAudioPlayback> ActivePlaybacks = new();
 	public static readonly List<OAudioPlayback> StoredPlaybacks = new();
 
 	private static void DrawPlaybacks()
@@ -114,6 +114,15 @@ internal class Window : GameWindow
 				}
 			}
 			ImGui.SameLine();
+			if (ImGui.Button("open"))
+			{
+				OAudioPlayback ChildClone = new(LoadedPlayback)
+				{
+					IsChild = true,
+				};
+				ActivePlaybacks.Add(ChildClone);
+			}
+			ImGui.SameLine();
 			if (ImGui.Button("delete"))
 			{
 				StoredPlaybacks.RemoveAt(PlaybackIndex);
@@ -124,19 +133,19 @@ internal class Window : GameWindow
 		
 	public static void AddPlayback(OAudioPlayback AudioPlayback)
 	{
-		RootPlaybacks.Add(AudioPlayback);
+		ActivePlaybacks.Add(AudioPlayback);
 	}
 
 	public static void RemovePlayback(OAudioPlayback AudioPlayback)
 	{
-		RootPlaybacks.RemoveAt(RootPlaybacks.IndexOf(AudioPlayback));
+		ActivePlaybacks.RemoveAt(ActivePlaybacks.IndexOf(AudioPlayback));
 	}
 
 	private static void CreateBasePlaybacks(int PlaybackCount = 4)
 	{
 		for (int Playback = 0; Playback < PlaybackCount; ++Playback)
 		{
-			RootPlaybacks.Add(new());
+			ActivePlaybacks.Add(new());
 		}
 	}
 
@@ -144,9 +153,9 @@ internal class Window : GameWindow
 	{
 		ImGui.Begin("main");
 
-		for (int PlaybackIndex = 0; PlaybackIndex < RootPlaybacks.Count; ++PlaybackIndex)
+		for (int PlaybackIndex = 0; PlaybackIndex < ActivePlaybacks.Count; ++PlaybackIndex)
 		{
-			var StoredPlayback = RootPlaybacks[PlaybackIndex];
+			var StoredPlayback = ActivePlaybacks[PlaybackIndex];
 			StoredPlayback.DrawBlock();
 			ImGui.NewLine();
 			ImGui.NewLine();

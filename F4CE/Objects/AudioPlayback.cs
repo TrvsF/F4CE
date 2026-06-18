@@ -5,7 +5,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Threading.Tasks;
 
 namespace F4CE.Objects;
 
@@ -310,7 +309,7 @@ internal partial class OAudioPlayback
 
 	public static void SaveAllPlaybacksToFile()
 	{
-		if (Window.RootPlaybacks.Count == 0)
+		if (Window.ActivePlaybacks.Count == 0)
 		{
 			return;
 		}
@@ -327,7 +326,7 @@ internal partial class OAudioPlayback
 
 		List<ISampleProvider> RenderedProviders = new();
 
-		foreach (var Playback in Window.RootPlaybacks)
+		foreach (var Playback in Window.ActivePlaybacks)
 		{
 			if (Playback.HasRecording)
 			{

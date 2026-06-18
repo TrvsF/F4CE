@@ -172,6 +172,14 @@ internal partial class OAudioPlayback
 			RefreshSettings();
 		}
 
+		if (ImGui.Button("save"))
+		{
+			if (!Window.StoredPlaybacks.Contains(this))
+			{
+				Window.StoredPlaybacks.Add(this);
+			}
+		}
+
 		if (IsChild)
 		{
 			ImGui.NewLine();
@@ -185,14 +193,6 @@ internal partial class OAudioPlayback
 				Window.RemovePlayback(this);
 			}
 			ImGui.End();
-		}
-
-		if (ImGui.Button("save"))
-		{
-			if (!Window.StoredPlaybacks.Contains(this))
-			{
-				Window.StoredPlaybacks.Add(this);
-			}
 		}
 
 		ImGui.PopID();
