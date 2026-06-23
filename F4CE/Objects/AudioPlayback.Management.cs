@@ -79,4 +79,9 @@ internal partial class OAudioPlayback : IDisposable
 	{
 		Dispose(false);
 	}
+
+	public override string ToString()
+	{
+		return ImGuiD.ToString();
+	}
 }

@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text.Json;
 
 namespace F4CE.Objects;
 
@@ -12,7 +13,7 @@ internal partial class OAudioPlayback
 {
 	public MemoryStream MemoryStream { get; } = new();
 
-	public FPlaybackSettings PlaybackSettings { get; private set; } = new();
+	public FPlaybackSettings PlaybackSettings { get; set; } = new();
 	public bool IsRecording { get; private set; } = false;
 	public bool IsPlaying { get; private set; } = false;
 
@@ -289,7 +290,7 @@ internal partial class OAudioPlayback
 
 	public void RequestAddition(OAudioPlayback Child, TimeSpan EmplaceTime)
 	{
-		Window.RemovePlayback(Child);
+		PlaybackManager.RemovePlayback(Child);
 
 		Children.RemoveAll(C => C.Playback == Child);
 		Children.Add((Child, EmplaceTime));
@@ -307,86 +308,85 @@ internal partial class OAudioPlayback
 		return false;
 	}
 
-	public static void SaveAllPlaybacksToFile()
+	public void WritePlayback(BinaryWriter Bw)
 	{
-		if (Window.ActivePlaybacks.Count == 0)
+		Writer?.Flush();
+
+		byte[] Audio = IsRecording ? [] : MemoryStream.ToArray();
+		Bw.Write(Audio.Length);
+
+		if (Audio.Length > 0)
 		{
-			return;
+			Bw.Write(Audio);
 		}
 
-		string DesktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-		string Path = System.IO.Path.Combine(DesktopPath, "F4CE.wav");
+		var SettingsJson = JsonSerializer.Serialize(PlaybackSettings, PlaybackManager.JsonOptions);
+		Bw.Write(SettingsJson);
+		Bw.Write(Children.Count);
 
-		int SaveCounter = 1337;
-		while (File.Exists(Path))
+		foreach (var (Child, EmplaceTime) in Children)
 		{
-			Path = System.IO.Path.Combine(DesktopPath, $"F4CE-{SaveCounter}.wav");
-			++SaveCounter;
+			Child.WritePlayback(Bw);
+			Bw.Write(EmplaceTime.Ticks);
+		}
+	}
+
+	public void ReadPlayback(BinaryReader Br)
+	{
+		int AudioLength = Br.ReadInt32();
+		if (AudioLength > 0)
+		{
+			byte[] Audio = Br.ReadBytes(AudioLength);
+			MemoryStream.Write(Audio, 0, AudioLength);
+			MemoryStream.Position = 0;
 		}
 
-		List<ISampleProvider> RenderedProviders = new();
+		string SettingsJson = Br.ReadString();
+		PlaybackSettings = JsonSerializer.Deserialize<FPlaybackSettings>(SettingsJson, PlaybackManager.JsonOptions) ?? new FPlaybackSettings();
 
-		foreach (var Playback in Window.ActivePlaybacks)
+		int ChildCount = Br.ReadInt32();
+		for (int ChildIndex = 0; ChildIndex < ChildCount; ++ChildIndex)
 		{
-			if (Playback.HasRecording)
+			OAudioPlayback Child = new()
 			{
-				MemoryStream CopyStream = new(Playback.MemoryStream.ToArray());
-				WaveFileReader Reader = new(CopyStream);
-				ISampleProvider BaseProvider = Reader.ToSampleProvider();
+				IsChild = true,
+			};
+			Child.ReadPlayback(Br);
+			TimeSpan EmplaceTime = new(Br.ReadInt64());
+			Children.Add((Child, EmplaceTime));
+		}
+	}
 
-				OSampleProviderOne Shifted = new(BaseProvider)
-				{
-					BaseDuration = Playback.MemoryStream.Length,
-					PlaybackSettings = Playback.PlaybackSettings,
-				};
+	public void ExportProvider(out List<ISampleProvider> Export)
+	{
+		Export = new();
 
-				RenderedProviders.Add(Shifted);
+		MemoryStream CopyStream = new(MemoryStream.ToArray());
+		WaveFileReader Reader = new(CopyStream);
+		ISampleProvider BaseProvider = Reader.ToSampleProvider();
+
+		OSampleProviderOne Provider = new(BaseProvider)
+		{
+			BaseDuration = MemoryStream.Length,
+			PlaybackSettings = PlaybackSettings,
+		};
+
+		Export.Add(Provider);
+
+		foreach (var (Child, EmplaceTime) in Children)
+		{
+			if (!Child.HasRecording)
+			{
+				continue;
 			}
 
-			foreach (var (Child, EmplaceTime) in Playback.GetChildren())
+			Child.ExportProvider(out var ChildExports);
+
+			foreach (var ChildExport in ChildExports)
 			{
-				if (!Child.HasRecording)
-				{
-					continue;
-				}
-
-				MemoryStream ChildCopyStream = new(Child.MemoryStream.ToArray());
-				WaveFileReader ChildReader = new(ChildCopyStream);
-				ISampleProvider ChildBaseProvider = ChildReader.ToSampleProvider();
-
-				OSampleProviderOne ChildShifted = new(ChildBaseProvider)
-				{
-					BaseDuration = Child.MemoryStream.Length,
-					PlaybackSettings = Child.PlaybackSettings,
-				};
-
-				ISampleProvider PositionedChild = EmplaceTime > TimeSpan.Zero
-					? new OffsetSampleProvider(ChildShifted) { DelayBy = EmplaceTime }
-					: ChildShifted;
-
-				RenderedProviders.Add(PositionedChild);
+				ISampleProvider PositionedChild = EmplaceTime > TimeSpan.Zero ? new OffsetSampleProvider(ChildExport) { DelayBy = EmplaceTime } : ChildExport;
+				Export.Add(PositionedChild);
 			}
 		}
-
-		if (RenderedProviders.Count == 0)
-		{
-			return;
-		}
-
-		MixingSampleProvider Mixer = new(RenderedProviders);
-		Mixer.ReadFully = false;
-
-		WaveFormat Format = Mixer.WaveFormat;
-		using WaveFileWriter Writer = new(Path, Format);
-
-		float[] Buffer = new float[1024];
-		int Read;
-
-		while ((Read = Mixer.Read(Buffer, 0, Buffer.Length)) > 0)
-		{
-			Writer.WriteSamples(Buffer, 0, Read);
-		}
-
-		Writer.Flush();
 	}
 }

@@ -22,6 +22,8 @@ internal partial class OAudioPlayback
 {
 	public readonly Guid ImGuiD = Guid.NewGuid();
 
+	int SelectedIndex = -1;
+
 	public void DrawBlock()
 	{
 		ImGui.PushID(ImGuiD.ToString());
@@ -91,9 +93,30 @@ internal partial class OAudioPlayback
 			ImGui.SetNextItemWidth(80);
 			ImGui.SliderInt("Rs", ref PlaybackSettings.Rs, 0, 8);
 			ImGui.SameLine();
-			if (ImGui.Button("ADD!"))
+			if (ImGui.Button("CREATE!"))
 			{
 				CreateChildPlayback();
+			}
+			ImGui.SameLine();
+			string PreviewLabel = SelectedIndex >= 0 && SelectedIndex < PlaybackManager.StoredPlaybacks.Count ? $"{PlaybackManager.StoredPlaybacks[SelectedIndex]}" : "Select Playback...";
+
+			if (ImGui.BeginCombo("##PlaybackCombo", PreviewLabel))
+			{
+				for (int PlaybacksIndex = 0; PlaybacksIndex < PlaybackManager.StoredPlaybacks.Count; PlaybacksIndex++)
+				{
+					bool IsSelected = SelectedIndex == PlaybacksIndex;
+					if (ImGui.Selectable($"{PlaybackManager.StoredPlaybacks[PlaybacksIndex]}", IsSelected))
+					{
+						SelectedIndex = PlaybacksIndex;
+						var Playback = PlaybackManager.StoredPlaybacks[PlaybacksIndex];
+						Console.WriteLine($"{Playback}");
+						RequestAddition(Playback, new());
+					}
+
+					if (IsSelected)
+						ImGui.SetItemDefaultFocus();
+				}
+				ImGui.EndCombo();
 			}
 
 			ImGui.SetNextItemWidth(80);
@@ -169,15 +192,21 @@ internal partial class OAudioPlayback
 				ImGui.NewLine();
 			}
 
-			RefreshSettings();
-		}
-
-		if (ImGui.Button("save"))
-		{
-			if (!Window.StoredPlaybacks.Contains(this))
+			if (ImGui.Button("save"))
 			{
-				Window.StoredPlaybacks.Add(this);
+				if (!PlaybackManager.StoredPlaybacks.Contains(this))
+				{
+					PlaybackManager.StoredPlaybacks.Add(this);
+				}
 			}
+
+			if (ImGui.Button("export"))
+			{
+				ExportProvider(out var Export);
+				PlaybackManager.ExportProviders(Export);
+			}
+
+			RefreshSettings();
 		}
 
 		if (IsChild)
@@ -190,7 +219,7 @@ internal partial class OAudioPlayback
 			ImGui.SameLine();
 			if (ImGui.Button("FUCK me"))
 			{
-				Window.RemovePlayback(this);
+				PlaybackManager.RemovePlayback(this);
 			}
 			ImGui.End();
 		}
@@ -206,6 +235,6 @@ internal partial class OAudioPlayback
 		};
 
 		ChildPlayback.MergeRequested += RequestAddition;
-		Window.AddPlayback(ChildPlayback);
+		PlaybackManager.AddPlayback(ChildPlayback);
 	}
 }

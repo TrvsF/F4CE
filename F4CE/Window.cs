@@ -18,7 +18,6 @@ internal class Window : GameWindow
 	public Window() : base(GameWindowSettings.Default, new NativeWindowSettings() { ClientSize = new OpenTK.Mathematics.Vector2i(1280, 960), APIVersion = new Version(3, 3) })
 	{ }
 
-	private static readonly string SavePath = Path.Combine(AppContext.BaseDirectory, "playbacks.bin");
 
 	protected override void OnLoad()
 	{
@@ -49,9 +48,7 @@ internal class Window : GameWindow
 		ImguiImplOpenTK4.Init(this);
 		ImguiImplOpenGL3.Init();
 
-		//////////////////////////////////////////////////
-		CreateBasePlaybacks();
-		StoredPlaybacks.AddRange(OAudioPlayback.LoadListFromFile(SavePath));
+		PlaybackManager.RefreshPlaybacks(); // !
 	}
 
 	protected override void OnRenderFrame(FrameEventArgs EventArgs)
@@ -87,20 +84,17 @@ internal class Window : GameWindow
 	{
 		Console.WriteLine($"Saving!");
 
-		OAudioPlayback.SaveListToFile(StoredPlaybacks, SavePath);
+		PlaybackManager.SaveListToFile();
 
 		ImguiImplOpenGL3.Shutdown();
 		ImguiImplOpenTK4.Shutdown();
 	}
-	
-	public static readonly List<OAudioPlayback> ActivePlaybacks = new();
-	public static readonly List<OAudioPlayback> StoredPlaybacks = new();
 
 	private static void DrawPlaybacks()
 	{
-		for (int PlaybackIndex = StoredPlaybacks.Count - 1; PlaybackIndex >= 0; --PlaybackIndex)
+		for (int PlaybackIndex = PlaybackManager.StoredPlaybacks.Count - 1; PlaybackIndex >= 0; --PlaybackIndex)
 		{
-			var LoadedPlayback = StoredPlaybacks[PlaybackIndex];
+			var LoadedPlayback = PlaybackManager.StoredPlaybacks[PlaybackIndex];
 			ImGui.PushID($"{LoadedPlayback.ImGuiD}");
 			if (ImGui.Button($"{LoadedPlayback.ImGuiD} {LoadedPlayback.GetTotalDuration()}"))
 			{
@@ -120,42 +114,26 @@ internal class Window : GameWindow
 				{
 					IsChild = true,
 				};
-				ActivePlaybacks.Add(ChildClone);
+				PlaybackManager.ActivePlaybacks.Add(ChildClone);
 			}
 			ImGui.SameLine();
 			if (ImGui.Button("delete"))
 			{
-				StoredPlaybacks.RemoveAt(PlaybackIndex);
+				PlaybackManager.StoredPlaybacks.RemoveAt(PlaybackIndex);
 			}
 			ImGui.PopID();
 		}
 	}
 		
-	public static void AddPlayback(OAudioPlayback AudioPlayback)
-	{
-		ActivePlaybacks.Add(AudioPlayback);
-	}
-
-	public static void RemovePlayback(OAudioPlayback AudioPlayback)
-	{
-		ActivePlaybacks.RemoveAt(ActivePlaybacks.IndexOf(AudioPlayback));
-	}
-
-	private static void CreateBasePlaybacks(int PlaybackCount = 4)
-	{
-		for (int Playback = 0; Playback < PlaybackCount; ++Playback)
-		{
-			ActivePlaybacks.Add(new());
-		}
-	}
+	
 
 	private static void DrawMainImgui()
 	{
 		ImGui.Begin("main");
 
-		for (int PlaybackIndex = 0; PlaybackIndex < ActivePlaybacks.Count; ++PlaybackIndex)
+		for (int PlaybackIndex = 0; PlaybackIndex < PlaybackManager.ActivePlaybacks.Count; ++PlaybackIndex)
 		{
-			var StoredPlayback = ActivePlaybacks[PlaybackIndex];
+			var StoredPlayback = PlaybackManager.ActivePlaybacks[PlaybackIndex];
 			StoredPlayback.DrawBlock();
 			ImGui.NewLine();
 			ImGui.NewLine();
@@ -164,7 +142,7 @@ internal class Window : GameWindow
 		ImGui.NewLine();
 		if (ImGui.Button("FOLLOW THAT CHUNE", new Vector2(260, 30)))
 		{
-			OAudioPlayback.SaveAllPlaybacksToFile();
+			PlaybackManager.SaveAllPlaybacksToFile();
 		}
 		ImGui.NewLine();
 		DrawPlaybacks();
