@@ -44,7 +44,7 @@ internal partial class OAudioPlayback
 		StopRecording();
 		StopPlayback();
 
-		WaveFormat Format = new(44100, 2);
+		WaveFormat Format = new(PlaybackManager.SampleRate, PlaybackManager.Channels);
 
 		using MemoryStream TempStream = new();
 
@@ -220,7 +220,7 @@ internal partial class OAudioPlayback
 		Reader?.Dispose();
 		Reader = null;
 
-		WaveOut = null; // already disposed by the PlaybackStopped
+		WaveOut = null;
 
 		OProvider = null;
 		IsPlaying = false;
@@ -250,6 +250,11 @@ internal partial class OAudioPlayback
 	private TimeSpan GetBaseDuration()
 	{
 		if (MemoryStream.Length == 0)
+		{
+			return TimeSpan.Zero;
+		}
+
+		if (!MemoryStream.CanRead)
 		{
 			return TimeSpan.Zero;
 		}
@@ -361,6 +366,8 @@ internal partial class OAudioPlayback
 	{
 		Export = new();
 
+		MemoryStream.Seek(0, SeekOrigin.Begin); 
+
 		MemoryStream CopyStream = new(MemoryStream.ToArray());
 		WaveFileReader Reader = new(CopyStream);
 		ISampleProvider BaseProvider = Reader.ToSampleProvider();
@@ -388,5 +395,43 @@ internal partial class OAudioPlayback
 				Export.Add(PositionedChild);
 			}
 		}
+	}
+
+	public void LoadFromMp3(string FilePath)
+	{
+		StopRecording();
+		StopPlayback();
+
+		MemoryStream.Position = 0;
+		MemoryStream.SetLength(0);
+
+		// AudioFileReader decodes MP3 → IEEE-float sample provider
+		using AudioFileReader AudioFile = new(FilePath);
+
+		// Resample to engine sample rate if needed
+		ISampleProvider Resampled = AudioFile.WaveFormat.SampleRate != PlaybackManager.SampleRate
+			? new WdlResamplingSampleProvider(AudioFile, PlaybackManager.SampleRate)
+			: AudioFile;
+
+		// Upmix mono → stereo if needed
+		ISampleProvider Final = AudioFile.WaveFormat.Channels == 1 && PlaybackManager.Channels == 2
+			? new MonoToStereoSampleProvider(Resampled)
+			: Resampled;
+
+		using MemoryStream TempStream = new();
+		using (WaveFileWriter WavWriter = new(new IgnoreDisposeStream(TempStream), Final.WaveFormat))
+		{
+			float[] Buffer = new float[8192];
+			int SamplesRead;
+			while ((SamplesRead = Final.Read(Buffer, 0, Buffer.Length)) > 0)
+			{
+				WavWriter.WriteSamples(Buffer, 0, SamplesRead);
+			}
+			WavWriter.Flush();
+		}
+
+		TempStream.Position = 0;
+		TempStream.CopyTo(MemoryStream);
+		MemoryStream.Position = 0;
 	}
 }

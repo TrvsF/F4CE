@@ -11,6 +11,11 @@ namespace F4CE;
 
 internal class PlaybackManager
 {
+	public static readonly int SampleRate = 44100;
+	public static readonly int Channels = 2;
+	public static readonly int BitRate = SampleRate * Channels;
+	public static readonly float BitRatePerMillisecond = BitRate / 1000f;
+
 	public static readonly List<OAudioPlayback> ActivePlaybacks = new();
 	public static readonly List<OAudioPlayback> StoredPlaybacks = new();
 
@@ -108,26 +113,20 @@ internal class PlaybackManager
 
 	public static void ExportProviders(List<ISampleProvider> RenderedProviders)
 	{
-		if (RenderedProviders.Count == 0)
+		if (RenderedProviders.Count == 0) return;
+
+		MixingSampleProvider Mixer = new(RenderedProviders)
 		{
-			return;
-		}
+			ReadFully = false
+		};
 
-		MixingSampleProvider Mixer = new(RenderedProviders);
-		Mixer.ReadFully = false;
-
-		WaveFormat Format = Mixer.WaveFormat;
-		using WaveFileWriter Writer = new(GetPath(), Format);
-
-		float[] Buffer = new float[1024];
+		using WaveFileWriter Writer = new(GetPath(), Mixer.WaveFormat);
+		float[] Buffer = new float[4096];
 		int Read;
-
 		while ((Read = Mixer.Read(Buffer, 0, Buffer.Length)) > 0)
 		{
 			Writer.WriteSamples(Buffer, 0, Read);
 		}
-
-		Writer.Flush();
 	}
 
 	public static string GetPath()
@@ -156,6 +155,11 @@ internal class PlaybackManager
 
 		foreach (var Playback in ActivePlaybacks)
 		{
+			if (!Playback.HasRecording)
+			{
+				continue;
+			}
+
 			Playback.ExportProvider(out var Export);
 			RenderedProviders.AddRange(Export);
 		}

@@ -25,11 +25,42 @@ internal partial class OSampleProviderOne : ISampleProvider
 
 	public int Read(float[] Buffer, int Offset, int Count)
 	{
-		int Read;
+		long TrimStart = PlaybackSettings.TrimStart;
+		long TrimEnd = PlaybackSettings.TrimEnd;
 
+		if (TrimStart > 0)
+		{
+			long PlaybackBase = SourcePosition - SpeedBufferCount;
+			if (PlaybackBase < TrimStart)
+			{
+				SkipSourceSamples(TrimStart - PlaybackBase);
+			}
+		}
+
+		if (TrimEnd >= 0 && SourcePosition - SpeedBufferCount >= TrimEnd)
+		{
+			return 0;
+		}
+
+		int Read;
 		if (PlaybackSettings.PlaybackSpeed == 1f)
 		{
-			Read = Source.Read(Buffer, Offset, Count);
+			if (TrimEnd >= 0)
+			{
+				long Remaining = TrimEnd - SourcePosition;
+				if (Remaining <= 0)
+				{
+					return 0;
+				}
+
+				Count = (int)Math.Min(Count, Remaining);
+				Count -= Count % WaveFormat.Channels;
+				if (Count <= 0)
+				{
+					return 0;
+				}
+			}
+			Read = ReadFromSource(Buffer, Offset, Count);
 		}
 		else
 		{
@@ -42,6 +73,40 @@ internal partial class OSampleProviderOne : ISampleProvider
 		}
 
 		return ProcessBuffer(Buffer, Offset, Read);
+	}
+
+	private bool FillSpeedBuffer(int MinimumSamples)
+	{
+		CompactSpeedBuffer();
+
+		while (SpeedBufferCount < MinimumSamples)
+		{
+			EnsureSpeedBufferCapacity(SpeedBufferCount + MinimumSamples);
+
+			int Available = SpeedBuffer.Length - SpeedBufferCount;
+
+			long TrimEnd = PlaybackSettings.TrimEnd;
+			if (TrimEnd >= 0)
+			{
+				long Remaining = TrimEnd - SourcePosition;
+				if (Remaining <= 0)
+				{
+					return SpeedBufferCount >= MinimumSamples;
+				}
+
+				Available = (int)Math.Min(Available, Remaining);
+			}
+
+			int Read = ReadFromSource(SpeedBuffer, SpeedBufferCount, Available);
+			if (Read == 0)
+			{
+				return SpeedBufferCount >= MinimumSamples;
+			}
+
+			SpeedBufferCount += Read;
+		}
+
+		return true;
 	}
 
 	private float Phase;
@@ -68,8 +133,8 @@ internal partial class OSampleProviderOne : ISampleProvider
 			float LeftGain = MathF.Min((1f - Pan) * 0.5f + PlaybackSettings.PanBaseVolume, 1f);
 			float RightGain = MathF.Min((1f + Pan) * 0.5f + PlaybackSettings.PanBaseVolume, 1f);
 
-			Buffer[Offset + ReadIndex] = Sample * LeftGain * PlaybackSettings.Loudness;
-			Buffer[Offset + ReadIndex + 1] = Sample * RightGain * PlaybackSettings.Loudness;
+			Buffer[Offset + ReadIndex] = Sample * LeftGain * PlaybackSettings.Loudness * PlaybackSettings.LeftLoundness;
+			Buffer[Offset + ReadIndex + 1] = Sample * RightGain * PlaybackSettings.Loudness * PlaybackSettings.RightLoundness;
 
 			Phase += 1f / SampleRate;
 			PanPhase += 1f / SampleRate;
@@ -78,8 +143,9 @@ internal partial class OSampleProviderOne : ISampleProvider
 		return Read;
 	}
 
-	private float[] SpeedBuffer = Array.Empty<float>();
+	private long SourcePosition;
 	private float SpeedPosition;
+	private float[] SpeedBuffer = [];
 	private int SpeedBufferStart;
 	private int SpeedBufferCount;
 
@@ -140,26 +206,6 @@ internal partial class OSampleProviderOne : ISampleProvider
 		SpeedBufferStart = 0;
 	}
 
-	private bool FillSpeedBuffer(int MinimumSamples)
-	{
-		CompactSpeedBuffer();
-
-		while (SpeedBufferCount < MinimumSamples)
-		{
-			EnsureSpeedBufferCapacity(SpeedBufferCount + MinimumSamples);
-
-			int Read = Source.Read(SpeedBuffer, SpeedBufferCount, SpeedBuffer.Length - SpeedBufferCount);
-			if (Read == 0)
-			{
-				return SpeedBufferCount >= MinimumSamples;
-			}
-
-			SpeedBufferCount += Read;
-		}
-
-		return true;
-	}
-
 	private void EnsureSpeedBufferCapacity(int Capacity)
 	{
 		if (SpeedBuffer.Length >= Capacity)
@@ -169,5 +215,37 @@ internal partial class OSampleProviderOne : ISampleProvider
 
 		int NewCapacity = Math.Max(Capacity, Math.Max(1024, SpeedBuffer.Length * 2));
 		Array.Resize(ref SpeedBuffer, NewCapacity);
+	}
+
+	private int ReadFromSource(float[] Buffer, int Offset, int Count)
+	{
+		int Read = Source.Read(Buffer, Offset, Count);
+		SourcePosition += Read;
+		return Read;
+	}
+
+	private void SkipSourceSamples(long SamplesToSkip)
+	{
+		if (SpeedBufferCount > 0)
+		{
+			int FromBuffer = (int)Math.Min(SpeedBufferCount, SamplesToSkip);
+			SpeedBufferStart += FromBuffer;
+			SpeedBufferCount -= FromBuffer;
+			SamplesToSkip -= FromBuffer;
+		}
+
+		float[] Temp = new float[4096];
+		while (SamplesToSkip > 0)
+		{
+			int ToRead = (int)Math.Min(Temp.Length, SamplesToSkip);
+			int Read = Source.Read(Temp, 0, ToRead);
+			if (Read == 0)
+			{
+				break;
+			}
+
+			SourcePosition += Read;
+			SamplesToSkip -= Read;
+		}
 	}
 }
