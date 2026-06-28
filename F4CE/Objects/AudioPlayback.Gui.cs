@@ -32,12 +32,13 @@ internal partial class OAudioPlayback
 	public int SMp3SelectedIndex = -1;
 	public bool SMp3FolderScanned = false;
 
-	int SelectedIndex = -1;
+	private int LoopTimes = 1;
+	private int SelectedIndex = -1;
 
-	const float PixelsPerSecond = 20f;
-	const float MainHeight = 40f;
-	const float ChildHeight = 28f;
-	const float ChildGap = 4f;
+	private const float PixelsPerSecond = 20f;
+	private const float MainHeight = 40f;
+	private const float ChildHeight = 28f;
+	private const float ChildGap = 4f;
 
 	public void DrawBlock()
 	{
@@ -67,15 +68,14 @@ internal partial class OAudioPlayback
 				{
 					SetSilence(TimeSpan.FromSeconds(PlaybackSettings.SilenceSeconds));
 					PlaybackSettings.WaveExpression = "sin(t*PI*100)";
+					PlaybackSettings.TrimEnd = (long) (PlaybackSettings.SilenceSeconds * PlaybackManager.BitRate);
 				}
 
 				bool Refresh = ImGui.Button("Refresh##Mp3Refresh");
 
 				if (!SMp3FolderScanned || Refresh)
 				{
-					SMp3FilePaths = Directory.Exists(Mp3ImportFolder)
-						? new List<string>(Directory.GetFiles(Mp3ImportFolder, "*.mp3", SearchOption.TopDirectoryOnly))
-						: new List<string>();
+					SMp3FilePaths = Directory.Exists(Mp3ImportFolder) ? new List<string>(Directory.GetFiles(Mp3ImportFolder, "*.mp3", SearchOption.TopDirectoryOnly)) : [];
 
 					SMp3SelectedIndex = -1;
 					SMp3FolderScanned = true;
@@ -83,9 +83,7 @@ internal partial class OAudioPlayback
 
 				ImGui.SameLine();
 
-				string PreviewLabel = SMp3SelectedIndex >= 0 && SMp3SelectedIndex < SMp3FilePaths.Count
-					? Path.GetFileNameWithoutExtension(SMp3FilePaths[SMp3SelectedIndex])
-					: SMp3FilePaths.Count > 0 ? "Select MP3..." : "(no files found)";
+				string PreviewLabel = SMp3SelectedIndex >= 0 && SMp3SelectedIndex < SMp3FilePaths.Count ? Path.GetFileNameWithoutExtension(SMp3FilePaths[SMp3SelectedIndex]) : SMp3FilePaths.Count > 0 ? "Select MP3..." : "(no files found)";
 
 				if (ImGui.BeginCombo("##Mp3ImportCombo", PreviewLabel))
 				{
@@ -109,12 +107,14 @@ internal partial class OAudioPlayback
 
 					ImGui.EndCombo();
 				}
+				ImGui.NewLine();
 			}
 			else
 			{
 				if (ImGui.Button("Stop Recording", new Vector2(160, 20)))
 				{
 					StopRecording();
+					// PlaybackSettings.TrimEnd = (long)(GetTotalDuration().TotalSeconds * PlaybackManager.BitRate);
 				}
 
 				TimelineOrigin = ImGui.GetCursorScreenPos();
@@ -176,7 +176,7 @@ internal partial class OAudioPlayback
 						SelectedIndex = PlaybacksIndex;
 						var Playback = PlaybackManager.StoredPlaybacks[PlaybacksIndex];
 						Console.WriteLine($"{Playback}");
-						RequestAddition(Playback, new());
+						AddChild(Playback, new());
 					}
 
 					if (IsSelected)
@@ -200,8 +200,6 @@ internal partial class OAudioPlayback
 			ImGui.SetNextItemWidth(80);
 			ImGui.SliderFloat("PanBaseVolume", ref PlaybackSettings.PanBaseVolume, 0f, 1f);
 			ImGui.SameLine();
-			ImGui.Text($"{GetTotalDuration().TotalSeconds}s");
-			ImGui.SameLine();
 
 			//if (IsInputValid)
 			//{
@@ -214,20 +212,43 @@ internal partial class OAudioPlayback
 			//	ImGui.PopStyleColor();
 			//}
 
-			float Start = PlaybackSettings.TrimStart / PlaybackManager.BitRatePerMillisecond;
-			float End = PlaybackSettings.TrimEnd / PlaybackManager.BitRatePerMillisecond;
+			float StartTime = (float) (PlaybackSettings.TrimStart / (double) PlaybackManager.BitRate);
+			float EndTime = (float) (PlaybackSettings.TrimEnd / (double) PlaybackManager.BitRate);
+			float TotalSeconds = (float) GetTotalDuration().TotalSeconds;
 
 			ImGui.SetNextItemWidth(160);
-			ImGui.SliderFloat("START", ref Start, 0f, (float) GetTotalDuration().TotalMilliseconds);
+			if (ImGui.SliderFloat("START", ref StartTime, 0f, TotalSeconds))
+			{
+				PlaybackSettings.TrimStart = (long) Math.Round(StartTime * PlaybackManager.BitRate);
+			}
+
 			ImGui.SameLine();
 			ImGui.SetNextItemWidth(160);
-			ImGui.SliderFloat("E.N.D.", ref End, 0f, (float) GetTotalDuration().TotalMilliseconds);
-			ImGui.SameLine();
-			float MsPlayed = float.Lerp(0f, (float) GetTotalDuration().TotalMilliseconds, PlaybackProgress);
-			ImGui.Text($"{MsPlayed}/{GetTotalDuration().TotalMilliseconds}");
+			if (ImGui.SliderFloat("E.N.D.", ref EndTime, 0f, TotalSeconds))
+			{
+				PlaybackSettings.TrimEnd = (long) Math.Round(EndTime * PlaybackManager.BitRate);
+			}
 
-			PlaybackSettings.TrimStart = (long) (Start * PlaybackManager.BitRatePerMillisecond);
-			PlaybackSettings.TrimEnd = (long) (End * PlaybackManager.BitRatePerMillisecond);
+			ImGui.SameLine();
+			if (ImGui.Button("T-RIM"))
+			{
+				Trim(PlaybackSettings.TrimStart, PlaybackSettings.TrimEnd);
+				PlaybackSettings.TrimStart = 0;
+				// PlaybackSettings.TrimEnd = (long) Math.Round(EndTime * PlaybackManager.BitRate);
+			}
+
+			ImGui.SameLine();
+			ImGui.SetNextItemWidth(40);
+			ImGui.SliderInt("Loop Times", ref LoopTimes, 1, 24);
+			ImGui.SameLine();
+			if (ImGui.Button("Loop"))
+			{
+				Loop(LoopTimes);
+			}
+
+			ImGui.SameLine();
+			float MsPlayed = float.Lerp(0f, TotalSeconds, PlaybackProgress);
+			ImGui.Text($"{MsPlayed:F2}/{TotalSeconds:F2}");
 
 			if (!IsRecording)
 			{
@@ -267,8 +288,14 @@ internal partial class OAudioPlayback
 				ImGui.Dummy(new Vector2(TotalWidth, TotalHeight));
 			}
 
-			foreach (var (_, _) in Children)
-			{
+			for (int ChildIndex = 0; ChildIndex < Children.Count; ++ChildIndex)
+			{ 
+				if (ImGui.Button($"remove {Children[ChildIndex]}"))
+				{
+					Children.RemoveAt(ChildIndex);
+					continue;
+				}
+
 				ImGui.NewLine();
 			}
 
@@ -314,7 +341,7 @@ internal partial class OAudioPlayback
 			IsChild = true,
 		};
 
-		ChildPlayback.MergeRequested += RequestAddition;
+		ChildPlayback.MergeRequested += AddChild;
 		PlaybackManager.AddPlayback(ChildPlayback);
 	}
 }

@@ -8,9 +8,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 {
 	private readonly ISampleProvider Source;
 
-	public long BaseDuration { get; init; }
 	public FPlaybackSettings PlaybackSettings { get; set; }
-
 	public WaveFormat WaveFormat => Source.WaveFormat;
 
 	public OSampleProviderOne(ISampleProvider InSource)
@@ -25,8 +23,8 @@ internal partial class OSampleProviderOne : ISampleProvider
 
 	public int Read(float[] Buffer, int Offset, int Count)
 	{
-		long TrimStart = PlaybackSettings.TrimStart;
-		long TrimEnd = PlaybackSettings.TrimEnd;
+		long TrimStart = AlignedTrimStart;
+		long TrimEnd = AlignedTrimEnd;
 
 		if (TrimStart > 0)
 		{
@@ -85,7 +83,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 
 			int Available = SpeedBuffer.Length - SpeedBufferCount;
 
-			long TrimEnd = PlaybackSettings.TrimEnd;
+			long TrimEnd = AlignedTrimEnd;
 			if (TrimEnd >= 0)
 			{
 				long Remaining = TrimEnd - SourcePosition;
@@ -215,6 +213,25 @@ internal partial class OSampleProviderOne : ISampleProvider
 
 		int NewCapacity = Math.Max(Capacity, Math.Max(1024, SpeedBuffer.Length * 2));
 		Array.Resize(ref SpeedBuffer, NewCapacity);
+	}
+
+	private long AlignedTrimStart
+	{
+		get
+		{
+			long v = PlaybackSettings.TrimStart;
+			return v - (v % WaveFormat.Channels);
+		}
+	}
+
+	private long AlignedTrimEnd
+	{
+		get
+		{
+			long v = PlaybackSettings.TrimEnd;
+			if (v < 0) return v; 
+			return v - (v % WaveFormat.Channels);
+		}
 	}
 
 	private int ReadFromSource(float[] Buffer, int Offset, int Count)

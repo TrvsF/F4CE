@@ -140,7 +140,6 @@ internal partial class OAudioPlayback
 
 			OProvider = new OSampleProviderOne(Provider)
 			{
-				BaseDuration = MemoryStream.Length,
 				PlaybackSettings = PlaybackSettings,
 			};
 
@@ -165,7 +164,6 @@ internal partial class OAudioPlayback
 
 			Child.OProvider = new OSampleProviderOne(ChildSampleProvider)
 			{
-				BaseDuration = Child.MemoryStream.Length,
 				PlaybackSettings = Child.PlaybackSettings,
 			};
 
@@ -293,7 +291,7 @@ internal partial class OAudioPlayback
 	private readonly List<(OAudioPlayback Playback, TimeSpan EmplaceTime)> Children = new();
 	public IReadOnlyList<(OAudioPlayback Playback, TimeSpan EmplaceTime)> GetChildren() => Children;
 
-	public void RequestAddition(OAudioPlayback Child, TimeSpan EmplaceTime)
+	public void AddChild(OAudioPlayback Child, TimeSpan EmplaceTime)
 	{
 		PlaybackManager.RemovePlayback(Child);
 
@@ -301,7 +299,7 @@ internal partial class OAudioPlayback
 		Children.Add((Child, EmplaceTime));
 	}
 
-	public bool RemoveAddition(OAudioPlayback Child)
+	public bool RemoveChild(OAudioPlayback Child)
 	{
 		int RemovedCount = Children.RemoveAll(C => C.Playback == Child);
 
@@ -312,6 +310,8 @@ internal partial class OAudioPlayback
 
 		return false;
 	}
+
+	//////////////////////////////////////////////////////////////////////////////////// 
 
 	public void WritePlayback(BinaryWriter Bw)
 	{
@@ -366,7 +366,7 @@ internal partial class OAudioPlayback
 	{
 		Export = new();
 
-		MemoryStream.Seek(0, SeekOrigin.Begin); 
+		MemoryStream.Seek(0, SeekOrigin.Begin);
 
 		MemoryStream CopyStream = new(MemoryStream.ToArray());
 		WaveFileReader Reader = new(CopyStream);
@@ -374,7 +374,6 @@ internal partial class OAudioPlayback
 
 		OSampleProviderOne Provider = new(BaseProvider)
 		{
-			BaseDuration = MemoryStream.Length,
 			PlaybackSettings = PlaybackSettings,
 		};
 
@@ -397,6 +396,154 @@ internal partial class OAudioPlayback
 		}
 	}
 
+	private void TrimStream(long Start, long End)
+	{
+		if (MemoryStream.Length == 0) return;
+
+		MemoryStream.Position = 0;
+		WaveFormat Format;
+		long AudioDataLength;
+
+		using (WaveFileReader TempReader = new(new IgnoreDisposeStream(MemoryStream)))
+		{
+			Format = TempReader.WaveFormat;
+			AudioDataLength = TempReader.Length;
+		}
+
+		long AudioStart = (long) ((double) Start / PlaybackManager.BitRate * PlaybackSettings.PlaybackSpeed * Format.AverageBytesPerSecond);
+		long AudioEnd = (long) ((double) End / PlaybackManager.BitRate * PlaybackSettings.PlaybackSpeed * Format.AverageBytesPerSecond);
+
+		AudioStart = Math.Clamp(AudioStart, 0, AudioDataLength);
+		AudioEnd = Math.Clamp(AudioEnd, 0, AudioDataLength);
+
+		AudioStart = (AudioStart / Format.BlockAlign) * Format.BlockAlign;
+		AudioEnd = (AudioEnd / Format.BlockAlign) * Format.BlockAlign;
+
+		if (AudioStart >= AudioEnd)
+		{
+			MemoryStream.Position = 0;
+			MemoryStream.SetLength(0);
+			return;
+		}
+
+		byte[] AudioBuffer;
+		int BytesRead;
+
+		MemoryStream.Position = 0;
+		using (WaveFileReader Reader = new(new IgnoreDisposeStream(MemoryStream)))
+		{
+			Reader.Position = AudioStart;
+			AudioBuffer = new byte[AudioEnd - AudioStart];
+			BytesRead = Reader.Read(AudioBuffer, 0, AudioBuffer.Length);
+		}
+
+		using MemoryStream TempStream = new();
+		using (WaveFileWriter TrimWriter = new(new IgnoreDisposeStream(TempStream), Format))
+		{
+			TrimWriter.Write(AudioBuffer, 0, BytesRead);
+			TrimWriter.Flush();
+		}
+
+		MemoryStream.Position = 0;
+		MemoryStream.SetLength(0);
+		TempStream.Position = 0;
+		TempStream.CopyTo(MemoryStream);
+		MemoryStream.Position = 0;
+	}
+
+	public void Trim(long Start, long End)
+	{
+		StopRecording();
+		StopPlayback();
+
+		if (MemoryStream.Length == 0 && Children.Count == 0) return;
+		if (Start < 0) Start = 0;
+		if (End <= Start) return;
+
+		TimeSpan WallClockStart = TimeSpan.FromSeconds(Start / (double)PlaybackManager.BitRate);
+		TimeSpan WallClockEnd = TimeSpan.FromSeconds(End / (double)PlaybackManager.BitRate);
+
+		TrimStream(Start, End);
+
+		for (int ChildIndex = Children.Count - 1; ChildIndex >= 0; --ChildIndex)
+		{
+			var (Child, EmplaceTime) = Children[ChildIndex];
+
+			TimeSpan ChildDuration = Child.GetBaseDuration();
+			TimeSpan ChildWallEnd = EmplaceTime + ChildDuration;
+
+			if (ChildWallEnd <= WallClockStart || EmplaceTime >= WallClockEnd)
+			{
+				Children.RemoveAt(ChildIndex);
+				continue;
+			}
+
+			TimeSpan ChildTrimStart = WallClockStart > EmplaceTime ? WallClockStart - EmplaceTime : TimeSpan.Zero;
+			TimeSpan ChildTrimEnd = WallClockEnd < ChildWallEnd ? WallClockEnd - EmplaceTime : ChildDuration;
+
+			long ChildStart = (long)Math.Round(ChildTrimStart.TotalSeconds * PlaybackManager.BitRate);
+			long ChildEndPos = (long)Math.Round(ChildTrimEnd.TotalSeconds * PlaybackManager.BitRate);
+
+			TimeSpan NewEmplaceTime = EmplaceTime > WallClockStart ? EmplaceTime - WallClockStart : TimeSpan.Zero;
+
+			Child.Trim(ChildStart, ChildEndPos);
+
+			if (Child.MemoryStream.Length == 0 && Child.GetChildren().Count == 0)
+			{
+				Children.RemoveAt(ChildIndex);
+			}
+			else
+			{
+				Children[ChildIndex] = (Child, NewEmplaceTime);
+			}
+		}
+	}
+
+	public void Loop(int Times)
+	{
+		if (Times <= 1) return;
+
+		StopRecording();
+		StopPlayback();
+
+		if (MemoryStream.Length == 0) return;
+
+		MemoryStream.Position = 0;
+
+		WaveFormat Format;
+		byte[] AudioData;
+
+		using (WaveFileReader TempReader = new(new IgnoreDisposeStream(MemoryStream)))
+		{
+			Format = TempReader.WaveFormat;
+
+			AudioData = new byte[TempReader.Length];
+			int BytesRead = TempReader.Read(AudioData, 0, AudioData.Length);
+			Array.Resize(ref AudioData, BytesRead);
+		}
+
+		using MemoryStream TempStream = new();
+		using (WaveFileWriter LoopWriter = new(new IgnoreDisposeStream(TempStream), Format))
+		{
+			for (int I = 0; I < Times; I++)
+			{
+				LoopWriter.Write(AudioData, 0, AudioData.Length);
+			}
+
+			LoopWriter.Flush();
+		}
+
+		MemoryStream.Position = 0;
+		MemoryStream.SetLength(0);
+
+		TempStream.Position = 0;
+		TempStream.CopyTo(MemoryStream);
+
+		MemoryStream.Position = 0;
+	}
+
+	////////////////////////////////////////////////////////////////////////////////////
+
 	public void LoadFromMp3(string FilePath)
 	{
 		StopRecording();
@@ -405,18 +552,10 @@ internal partial class OAudioPlayback
 		MemoryStream.Position = 0;
 		MemoryStream.SetLength(0);
 
-		// AudioFileReader decodes MP3 → IEEE-float sample provider
 		using AudioFileReader AudioFile = new(FilePath);
 
-		// Resample to engine sample rate if needed
-		ISampleProvider Resampled = AudioFile.WaveFormat.SampleRate != PlaybackManager.SampleRate
-			? new WdlResamplingSampleProvider(AudioFile, PlaybackManager.SampleRate)
-			: AudioFile;
-
-		// Upmix mono → stereo if needed
-		ISampleProvider Final = AudioFile.WaveFormat.Channels == 1 && PlaybackManager.Channels == 2
-			? new MonoToStereoSampleProvider(Resampled)
-			: Resampled;
+		ISampleProvider Resampled = AudioFile.WaveFormat.SampleRate != PlaybackManager.SampleRate ? new WdlResamplingSampleProvider(AudioFile, PlaybackManager.SampleRate) : AudioFile;
+		ISampleProvider Final = AudioFile.WaveFormat.Channels == 1 && PlaybackManager.Channels == 2 ? new MonoToStereoSampleProvider(Resampled) : Resampled;
 
 		using MemoryStream TempStream = new();
 		using (WaveFileWriter WavWriter = new(new IgnoreDisposeStream(TempStream), Final.WaveFormat))
