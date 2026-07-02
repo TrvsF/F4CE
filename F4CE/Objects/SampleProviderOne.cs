@@ -113,20 +113,21 @@ internal partial class OSampleProviderOne : ISampleProvider
 	private int ProcessBuffer(float[] Buffer, int Offset, int Read)
 	{
 		float SampleRate = WaveFormat.SampleRate;
+		float PitchScale = MathF.Pow(2f, PlaybackSettings.TransposeSemitones / 12f);
+
+		float RGain = 1f;
+		float RFactor = 0.5f;
+		for (int RIndex = PlaybackSettings.Rs; RIndex > 0; --RIndex)
+		{
+			RGain += RGain * (RFactor / RIndex);
+		}
 
 		for (int ReadIndex = 0; ReadIndex < Read; ReadIndex += 2)
 		{
-			float PitchScale = MathF.Pow(2f, PlaybackSettings.TransposeSemitones / 12f);
 			float Frequency = Buffer[Offset + ReadIndex] * PitchScale;
-			float Sample = EvaluateWave(Frequency, Phase);
+			float Sample = EvaluateWave(Frequency, Phase) * RGain;
 
-			float RFactor = 0.5f;
-			for (int RIndex = PlaybackSettings.Rs; RIndex > 0; --RIndex)
-			{
-				Sample += Sample * (RFactor / RIndex);
-			}
-
-			float Pan = MathF.Sin(2f * MathF.PI * PlaybackSettings.PanSpeed * PanPhase);
+			float Pan = MathF.Sin(2f * MathF.PI * PanPhase);
 
 			float LeftGain = MathF.Min((1f - Pan) * 0.5f + PlaybackSettings.PanBaseVolume, 1f);
 			float RightGain = MathF.Min((1f + Pan) * 0.5f + PlaybackSettings.PanBaseVolume, 1f);
@@ -134,8 +135,11 @@ internal partial class OSampleProviderOne : ISampleProvider
 			Buffer[Offset + ReadIndex] = Sample * LeftGain * PlaybackSettings.Loudness * PlaybackSettings.LeftLoundness;
 			Buffer[Offset + ReadIndex + 1] = Sample * RightGain * PlaybackSettings.Loudness * PlaybackSettings.RightLoundness;
 
-			Phase += 1f / SampleRate;
-			PanPhase += 1f / SampleRate;
+			Phase += Frequency / SampleRate;
+			Phase -= MathF.Floor(Phase);
+
+			PanPhase += PlaybackSettings.PanSpeed / SampleRate;
+			PanPhase -= MathF.Floor(PanPhase);
 		}
 
 		return Read;

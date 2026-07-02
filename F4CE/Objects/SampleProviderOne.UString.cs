@@ -7,37 +7,55 @@ namespace F4CE.Objects;
 internal partial class OSampleProviderOne : ISampleProvider
 {
 	public bool IsExpressionValid => CachedGoodExpression == PlaybackSettings.WaveExpression;
+
 	private string CachedGoodExpression = "";
 	private string CachedBadExpression = "";
 	private Expression Expression = null;
 
 	private float EvaluateWave(float Frequency, float Time)
 	{
-		if (CachedGoodExpression == PlaybackSettings.WaveExpression || CachedBadExpression == PlaybackSettings.WaveExpression)
+		string WaveExpression = PlaybackSettings.WaveExpression;
+
+		if (CachedGoodExpression != WaveExpression && CachedBadExpression != WaveExpression)
 		{
-			Expression.Parameters["f"] = Frequency;
-			Expression.Parameters["t"] = Time;
-			return Convert.ToSingle(Expression.Evaluate());
+			Expression NewExpression = BuildExpression(WaveExpression);
+
+			if (NewExpression.HasErrors())
+			{
+				CachedBadExpression = WaveExpression;
+			}
+			else
+			{
+				Expression = NewExpression;
+				CachedGoodExpression = WaveExpression;
+			}
 		}
 
-		var NewExpression = new Expression(PlaybackSettings.WaveExpression);
+		if (Expression == null)
+		{
+			return Frequency;
+		}
 
-		NewExpression.Parameters["f"] = Frequency;
-		NewExpression.Parameters["t"] = Time;
+		Expression.Parameters["f"] = Frequency;
+		Expression.Parameters["t"] = Time;
+		return Convert.ToSingle(Expression.Evaluate());
+	}
+
+	private static Expression BuildExpression(string WaveExpression)
+	{
+		Expression NewExpression = new(WaveExpression);
 		NewExpression.Parameters["PI"] = MathF.PI;
 
-		NewExpression.EvaluateFunction += (Expression, Args) =>
+		NewExpression.EvaluateFunction += (Name, Args) =>
 		{
-			switch (Expression.ToLowerInvariant())
+			switch (Name.ToLowerInvariant())
 			{
 				case "sin":
 					Args.Result = MathF.Sin(Convert.ToSingle(Args.Parameters[0].Evaluate()));
 					break;
-
 				case "cos":
 					Args.Result = MathF.Cos(Convert.ToSingle(Args.Parameters[0].Evaluate()));
 					break;
-
 				case "tan":
 					Args.Result = MathF.Tan(Convert.ToSingle(Args.Parameters[0].Evaluate()));
 					break;
@@ -46,32 +64,14 @@ internal partial class OSampleProviderOne : ISampleProvider
 					break;
 				case "rnd":
 					{
-						float min = Convert.ToSingle(Args.Parameters[0].Evaluate());
-						float max = Convert.ToSingle(Args.Parameters[1].Evaluate());
-
-						float value = (float)(Random.Shared.NextDouble() * (max - min) + min);
-
-						Args.Result = value;
+						float Min = Convert.ToSingle(Args.Parameters[0].Evaluate());
+						float Max = Convert.ToSingle(Args.Parameters[1].Evaluate());
+						Args.Result = (float)(Random.Shared.NextDouble() * (Max - Min) + Min);
 						break;
 					}
 			}
 		};
 
-		if (NewExpression.HasErrors())
-		{
-			if (Expression == null)
-			{
-				return Frequency;
-			}
-
-			CachedBadExpression = PlaybackSettings.WaveExpression;
-			Expression.Parameters["f"] = Frequency;
-			Expression.Parameters["t"] = Time;
-			return Convert.ToSingle(Expression.Evaluate());
-		}
-
-		Expression = NewExpression;
-		CachedGoodExpression = PlaybackSettings.WaveExpression;
-		return Convert.ToSingle(Expression.Evaluate());
+		return NewExpression;
 	}
 }
