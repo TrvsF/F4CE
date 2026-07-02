@@ -8,7 +8,7 @@ namespace F4CE.Objects;
 
 public record FPlaybackSettings
 {
-	public string WaveExpression = "f*t";
+	public string WaveExpression = "f";
 	public bool Raw = false;
 	public long TrimStart = 0;
 	public long TrimEnd = -1;
@@ -127,6 +127,7 @@ internal partial class OAudioPlayback
 			if (ImGui.Button("Clear"))
 			{
 				MemoryStream.SetLength(0);
+				PlaybackSettings = new();
 			}
 
 			ImGui.Text($"{Children.Count}kidz");

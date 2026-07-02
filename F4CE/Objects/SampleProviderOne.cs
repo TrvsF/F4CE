@@ -107,13 +107,14 @@ internal partial class OSampleProviderOne : ISampleProvider
 		return true;
 	}
 
-	private float Phase;
+	private double Phase;
 	private float PanPhase;
 
 	private int ProcessBuffer(float[] Buffer, int Offset, int Read)
 	{
 		float SampleRate = WaveFormat.SampleRate;
 		float PitchScale = MathF.Pow(2f, PlaybackSettings.TransposeSemitones / 12f);
+		bool PassThrough = PlaybackSettings.WaveExpression == "f";
 
 		float RGain = 1f;
 		float RFactor = 0.5f;
@@ -125,7 +126,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 		for (int ReadIndex = 0; ReadIndex < Read; ReadIndex += 2)
 		{
 			float Frequency = Buffer[Offset + ReadIndex] * PitchScale;
-			float Sample = EvaluateWave(Frequency, Phase) * RGain;
+			float Sample = (PassThrough ? Frequency : EvaluateWave(Frequency, (float)Phase)) * RGain;
 
 			float Pan = MathF.Sin(2f * MathF.PI * PanPhase);
 
@@ -135,8 +136,7 @@ internal partial class OSampleProviderOne : ISampleProvider
 			Buffer[Offset + ReadIndex] = Sample * LeftGain * PlaybackSettings.Loudness * PlaybackSettings.LeftLoundness;
 			Buffer[Offset + ReadIndex + 1] = Sample * RightGain * PlaybackSettings.Loudness * PlaybackSettings.RightLoundness;
 
-			Phase += Frequency / SampleRate;
-			Phase -= MathF.Floor(Phase);
+			Phase += 1.0 / SampleRate;
 
 			PanPhase += PlaybackSettings.PanSpeed / SampleRate;
 			PanPhase -= MathF.Floor(PanPhase);
