@@ -128,6 +128,7 @@ internal partial class OAudioPlayback
 			{
 				MemoryStream.SetLength(0);
 				PlaybackSettings = new();
+				Children.Clear();
 			}
 
 			ImGui.Text($"{Children.Count}kidz");
