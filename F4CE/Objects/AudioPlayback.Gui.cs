@@ -27,13 +27,14 @@ internal partial class OAudioPlayback
 {
 	public readonly Guid ImGuiD = Guid.NewGuid();
 
-	public readonly string Mp3ImportFolder = "C:/";
+	public readonly string Mp3ImportFolder = "C:/Users/TravisF/Desktop/LOVEANDMISERY/wav";
 	public List<string> SMp3FilePaths = new();
 	public int SMp3SelectedIndex = -1;
 	public bool SMp3FolderScanned = false;
 
 	private int LoopTimes = 1;
 	private int SelectedIndex = -1;
+	private float ChildAddSeconds = 0;
 
 	private const float PixelsPerSecond = 20f;
 	private const float MainHeight = 40f;
@@ -75,7 +76,7 @@ internal partial class OAudioPlayback
 
 				if (!SMp3FolderScanned || Refresh)
 				{
-					SMp3FilePaths = Directory.Exists(Mp3ImportFolder) ? new List<string>(Directory.GetFiles(Mp3ImportFolder, "*.mp3", SearchOption.TopDirectoryOnly)) : [];
+					SMp3FilePaths = Directory.Exists(Mp3ImportFolder) ? new List<string>(Directory.GetFiles(Mp3ImportFolder, "*.wav", SearchOption.TopDirectoryOnly)) : [];
 
 					SMp3SelectedIndex = -1;
 					SMp3FolderScanned = true;
@@ -321,9 +322,12 @@ internal partial class OAudioPlayback
 		if (IsChild)
 		{
 			ImGui.NewLine();
+			ImGui.SetNextItemWidth(80);
+			ImGui.SliderFloat("Insert Time", ref ChildAddSeconds, 0f, 100f);
+			ImGui.NewLine();
 			if (ImGui.Button("Beam me UP"))
 			{
-				MergeRequested.Invoke(this, TimeSpan.FromSeconds(5));
+				MergeRequested.Invoke(this, TimeSpan.FromSeconds(ChildAddSeconds));
 			}
 			ImGui.SameLine();
 			if (ImGui.Button("FUCK me"))
