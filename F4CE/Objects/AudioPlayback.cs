@@ -77,8 +77,8 @@ internal partial class OAudioPlayback
 
 		WaveIn = new WaveInEvent
 		{
-			DeviceNumber = 0,
-			WaveFormat = new WaveFormat(44100, 2)
+			DeviceNumber = -1,
+			WaveFormat = new WaveFormat(44100, 24, 2)
 		};
 
 		Writer = new WaveFileWriter(new IgnoreDisposeStream(MemoryStream), WaveIn.WaveFormat);
@@ -89,7 +89,13 @@ internal partial class OAudioPlayback
 		WaveIn.StartRecording();
 
 		IsRecording = true;
-	}
+
+        for (int i = 0; i < WaveInEvent.DeviceCount; i++)
+        {
+            var caps = WaveInEvent.GetCapabilities(i);
+            Console.WriteLine($"{i}: {caps.ProductName} ({caps.Channels} ch)");
+        }
+    }
 
 	public void StopRecording()
 	{
@@ -105,13 +111,27 @@ internal partial class OAudioPlayback
 		IsRecording = false;
 	}
 
-	private void OnDataAvailable(object Sender, WaveInEventArgs Args)
-	{
-		if (Writer == null) return;
-		Writer.Write(Args.Buffer, 0, Args.BytesRecorded);
-	}
+    private void OnDataAvailable(object Sender, WaveInEventArgs Args)
+    {
+        if (Writer == null) return;
 
-	private WaveOutEvent WaveOut;
+        const int BytesPerFrame = 6;
+        float Peak = 0;
+
+        for (int Index = 0; Index + BytesPerFrame - 1 < Args.BytesRecorded; Index += BytesPerFrame)
+        {
+            Args.Buffer[Index] = Args.Buffer[Index + 3];
+            Args.Buffer[Index + 1] = Args.Buffer[Index + 4];
+            Args.Buffer[Index + 2] = Args.Buffer[Index + 5];
+
+            int Sample = Args.Buffer[Index] | (Args.Buffer[Index + 1] << 8) | ((sbyte)Args.Buffer[Index + 2] << 16);
+            Peak = Math.Max(Peak, Math.Abs(Sample / 8388608f));
+        }
+
+        Writer.Write(Args.Buffer, 0, Args.BytesRecorded);
+    }
+
+    private WaveOutEvent WaveOut;
 	private WaveFileReader Reader;
 	private OSampleProviderOne OProvider;
 	public bool IsInputValid { get => OProvider != null && !OProvider.IsExpressionValid; }
