@@ -77,7 +77,7 @@ internal partial class OAudioPlayback
 
 		WaveIn = new WaveInEvent
 		{
-			DeviceNumber = -1,
+			DeviceNumber = 0,
 			WaveFormat = new WaveFormat(44100, 24, 2)
 		};
 
@@ -86,15 +86,12 @@ internal partial class OAudioPlayback
 		WaveIn.RecordingStopped += OnRecordingStopped;
 		WaveIn.DataAvailable += OnDataAvailable;
 
+		var CapsTf2 = WaveInEvent.GetCapabilities(WaveIn.DeviceNumber);
+		Console.WriteLine($"Recording from: {CapsTf2.ProductName} (device {WaveIn.DeviceNumber})");
+
 		WaveIn.StartRecording();
 
 		IsRecording = true;
-
-        for (int i = 0; i < WaveInEvent.DeviceCount; i++)
-        {
-            var caps = WaveInEvent.GetCapabilities(i);
-            Console.WriteLine($"{i}: {caps.ProductName} ({caps.Channels} ch)");
-        }
     }
 
 	public void StopRecording()
