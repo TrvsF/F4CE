@@ -35,6 +35,7 @@ internal partial class OAudioPlayback
 	private int LoopTimes = 1;
 	private int SelectedIndex = -1;
 	private float ChildAddSeconds = 0;
+	private bool PlayParentWhenRecording = false;
 
 	private const float PixelsPerSecond = 20f;
 	private const float MainHeight = 40f;
@@ -62,6 +63,10 @@ internal partial class OAudioPlayback
 				if (ImGui.Button("Start Recording", new Vector2(160, 20)))
 				{
 					StartRecording();
+					if (IsChild)
+					{
+						PlayRecording.Invoke();
+					}
 				}
 				
 				ImGui.SliderFloat("Silence Length (Seconds)", ref PlaybackSettings.SilenceSeconds, 0f, 120f);
@@ -115,6 +120,10 @@ internal partial class OAudioPlayback
 				if (ImGui.Button("Stop Recording", new Vector2(160, 20)))
 				{
 					StopRecording();
+					if (IsChild)
+					{
+						StopPlayingRecording.Invoke();
+					}
 					// PlaybackSettings.TrimEnd = (long)(GetTotalDuration().TotalSeconds * PlaybackManager.BitRate);
 				}
 
@@ -330,6 +339,8 @@ internal partial class OAudioPlayback
 				MergeRequested.Invoke(this, TimeSpan.FromSeconds(ChildAddSeconds));
 			}
 			ImGui.SameLine();
+			ImGui.Checkbox("Play Parent When Recording", ref PlayParentWhenRecording);
+			ImGui.SameLine();
 			if (ImGui.Button("FUCK me"))
 			{
 				PlaybackManager.RemovePlayback(this);
@@ -338,16 +349,5 @@ internal partial class OAudioPlayback
 		}
 
 		ImGui.PopID();
-	}
-
-	private void CreateChildPlayback()
-	{
-		OAudioPlayback ChildPlayback = new()
-		{
-			IsChild = true,
-		};
-
-		ChildPlayback.MergeRequested += AddChild;
-		PlaybackManager.AddPlayback(ChildPlayback);
 	}
 }

@@ -303,6 +303,8 @@ internal partial class OAudioPlayback
 	}
 
 	public event Action<OAudioPlayback, TimeSpan> MergeRequested;
+	public event Action PlayRecording;
+	public event Action StopPlayingRecording;
 	public bool IsChild { get; init; } = false;
 
 	private readonly List<(OAudioPlayback Playback, TimeSpan EmplaceTime)> Children = new();
@@ -326,6 +328,19 @@ internal partial class OAudioPlayback
 		}
 
 		return false;
+	}
+
+	private void CreateChildPlayback()
+	{
+		OAudioPlayback ChildPlayback = new()
+		{
+			IsChild = true,
+		};
+
+		ChildPlayback.MergeRequested += AddChild;
+		ChildPlayback.PlayRecording += StartPlayback;
+		ChildPlayback.StopPlayingRecording += StopPlayback;
+		PlaybackManager.AddPlayback(ChildPlayback);
 	}
 
 	//////////////////////////////////////////////////////////////////////////////////// 
