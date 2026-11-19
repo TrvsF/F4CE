@@ -160,6 +160,12 @@ internal class PlaybackManager
 				continue;
 			}
 
+			// a kid with its window open is already in its parent's mix, don't export it twice
+			if (ActivePlaybacks.Any(Other => Other != Playback && Other.HasKid(Playback)))
+			{
+				continue;
+			}
+
 			Playback.ExportProvider(out var Export);
 			RenderedProviders.AddRange(Export);
 		}

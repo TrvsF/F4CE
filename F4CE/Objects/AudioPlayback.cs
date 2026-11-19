@@ -162,12 +162,15 @@ internal partial class OAudioPlayback
 
 			Disposables.Add(PlaybackReader);
 			Disposables.Add(PlaybackStream);
-			MixInputs.Add(OProvider);
+
+			TimeSpan OwnDelay = OwnStartDelay;
+			MixInputs.Add(OwnDelay > TimeSpan.Zero ? new OffsetSampleProvider(OProvider) { DelayBy = OwnDelay } : OProvider);
 		}
 
 		foreach (var (Child, EmplaceTime) in Children)
 		{
-			if (Child.MemoryStream.Length == 0)
+			// skip a kid that's being re-recorded from its window, its stream is still being written
+			if (Child.MemoryStream.Length == 0 || Child.IsRecording)
 			{
 				continue;
 			}
@@ -264,7 +267,8 @@ internal partial class OAudioPlayback
 
 	private TimeSpan GetBaseDuration()
 	{
-		if (MemoryStream.Length == 0)
+		// don't move the stream's position while the recorder is still writing to it
+		if (MemoryStream.Length == 0 || IsRecording)
 		{
 			return TimeSpan.Zero;
 		}
@@ -291,7 +295,9 @@ internal partial class OAudioPlayback
 
 		foreach (var (Child, EmplaceTime) in Children)
 		{
-			TimeSpan ChildEnd = EmplaceTime + Child.GetBaseDuration();
+			// a kid only plays its trimmed part, starting at EmplaceTime
+			var (From, To, _) = Child.GetTrimWindow();
+			TimeSpan ChildEnd = EmplaceTime + TimeSpan.FromSeconds(To - From);
 
 			if (ChildEnd > Latest)
 			{
@@ -302,19 +308,68 @@ internal partial class OAudioPlayback
 		return Latest;
 	}
 
+	// A top-level playback with its START trimmed keeps its audio where it is on the timeline, lined up with
+	// its kids, by starting it late (the trimmed bit is just silent until T-RIM cuts it). Kids get the same by
+	// moving when their start is trimmed, and a kid window plays as before.
+	private TimeSpan OwnStartDelay => IsChild ? TimeSpan.Zero : TimeSpan.FromSeconds(GetTrimWindow().From);
+
+	// source samples (the units TrimStart/TrimEnd are in) per second of timeline
+	private double TrimUnitsPerSecond => PlaybackManager.BitRate * (double) PlaybackSettings.PlaybackSpeed;
+
+	// The part of this playback's own recording that plays after its START/E.N.D. trim, in seconds of
+	// timeline from the start of the recording, plus the recording's untrimmed length.
+	private (double From, double To, double Length) GetTrimWindow()
+	{
+		double Length = GetBaseDuration().TotalSeconds;
+		double From = Math.Clamp(PlaybackSettings.TrimStart / TrimUnitsPerSecond, 0.0, Length);
+		double To = PlaybackSettings.TrimEnd < 0 ? Length : Math.Clamp(PlaybackSettings.TrimEnd / TrimUnitsPerSecond, From, Length);
+		return (From, To, Length);
+	}
+
+	// Sets the START/E.N.D. trim from seconds of timeline. The audio itself isn't touched, so a trim can be
+	// dragged back out again later (T-RIM is what actually cuts the audio).
+	private void SetTrimWindow(double From, double To)
+	{
+		double Length = GetBaseDuration().TotalSeconds;
+		PlaybackSettings.TrimStart = (long) Math.Round(Math.Max(0.0, From) * TrimUnitsPerSecond);
+		PlaybackSettings.TrimEnd = To >= Length - 0.0005 ? -1 : (long) Math.Round(To * TrimUnitsPerSecond); // -1 = play to the end
+	}
+
 	public event Action<OAudioPlayback, TimeSpan> MergeRequested;
+	public event Action<OAudioPlayback> RemoveRequested;
 	public event Action PlayRecording;
 	public event Action StopPlayingRecording;
-	public bool IsChild { get; init; } = false;
+	public bool IsChild { get; set; } = false;
 
 	private readonly List<(OAudioPlayback Playback, TimeSpan EmplaceTime)> Children = new();
 	public IReadOnlyList<(OAudioPlayback Playback, TimeSpan EmplaceTime)> GetChildren() => Children;
+
+	// whether Target is one of this playback's kids, or one of their kids, and so on
+	public bool HasKid(OAudioPlayback Target)
+	{
+		foreach (var (Child, _) in Children)
+		{
+			if (Child == Target || Child.HasKid(Target))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
 
 	public void AddChild(OAudioPlayback Child, TimeSpan EmplaceTime)
 	{
 		PlaybackManager.RemovePlayback(Child);
 
-		Children.RemoveAll(C => C.Playback == Child);
+		// a re-opened kid that gets beamed back up keeps its place (and its row on the timeline)
+		int ExistingIndex = Children.FindIndex(C => C.Playback == Child);
+		if (ExistingIndex >= 0)
+		{
+			Children[ExistingIndex] = (Child, EmplaceTime);
+			return;
+		}
+
 		Children.Add((Child, EmplaceTime));
 	}
 
@@ -337,10 +392,17 @@ internal partial class OAudioPlayback
 			IsChild = true,
 		};
 
-		ChildPlayback.MergeRequested += AddChild;
-		ChildPlayback.PlayRecording += StartPlayback;
-		ChildPlayback.StopPlayingRecording += StopPlayback;
+		WireChild(ChildPlayback);
 		PlaybackManager.AddPlayback(ChildPlayback);
+	}
+
+	// points the kid's buttons at this parent, replacing whatever they were hooked up to before
+	private void WireChild(OAudioPlayback Child)
+	{
+		Child.MergeRequested = AddChild;
+		Child.RemoveRequested = C => RemoveChild(C);
+		Child.PlayRecording = StartPlayback;
+		Child.StopPlayingRecording = StopPlayback;
 	}
 
 	//////////////////////////////////////////////////////////////////////////////////// 
@@ -394,7 +456,7 @@ internal partial class OAudioPlayback
 		}
 	}
 
-	public void ExportProvider(out List<ISampleProvider> Export)
+	public void ExportProvider(out List<ISampleProvider> Export, bool IsRoot = true)
 	{
 		Export = new();
 
@@ -409,7 +471,9 @@ internal partial class OAudioPlayback
 			PlaybackSettings = PlaybackSettings,
 		};
 
-		Export.Add(Provider);
+		// only the playback being exported gets this; a kid's start trim is already in its EmplaceTime
+		TimeSpan OwnDelay = IsRoot ? OwnStartDelay : TimeSpan.Zero;
+		Export.Add(OwnDelay > TimeSpan.Zero ? new OffsetSampleProvider(Provider) { DelayBy = OwnDelay } : Provider);
 
 		foreach (var (Child, EmplaceTime) in Children)
 		{
@@ -418,7 +482,7 @@ internal partial class OAudioPlayback
 				continue;
 			}
 
-			Child.ExportProvider(out var ChildExports);
+			Child.ExportProvider(out var ChildExports, IsRoot: false);
 
 			foreach (var ChildExport in ChildExports)
 			{
@@ -496,38 +560,39 @@ internal partial class OAudioPlayback
 		TimeSpan WallClockEnd = TimeSpan.FromSeconds(End / (double)PlaybackManager.BitRate);
 
 		TrimStream(Start, End);
+		TrimKids(WallClockStart, WallClockEnd);
+	}
 
+	// Keeps the parts of the kids that fall inside Start..End of this playback's timeline and shifts them so
+	// Start becomes 0. Kids get the same non-destructive trim as dragging their edges, so it matches what
+	// they actually play (even if they were already trimmed) and they can still be pulled back out after.
+	private void TrimKids(TimeSpan Start, TimeSpan End)
+	{
 		for (int ChildIndex = Children.Count - 1; ChildIndex >= 0; --ChildIndex)
 		{
 			var (Child, EmplaceTime) = Children[ChildIndex];
 
-			TimeSpan ChildDuration = Child.GetBaseDuration();
-			TimeSpan ChildWallEnd = EmplaceTime + ChildDuration;
+			if (Child.IsRecording)
+			{
+				continue; // being re-recorded from its window, leave it alone
+			}
 
-			if (ChildWallEnd <= WallClockStart || EmplaceTime >= WallClockEnd)
+			// a kid plays From..To of its recording, starting at EmplaceTime
+			var (From, To, _) = Child.GetTrimWindow();
+			TimeSpan ChildWallEnd = EmplaceTime + TimeSpan.FromSeconds(To - From);
+
+			if (ChildWallEnd <= Start || EmplaceTime >= End)
 			{
 				Children.RemoveAt(ChildIndex);
 				continue;
 			}
 
-			TimeSpan ChildTrimStart = WallClockStart > EmplaceTime ? WallClockStart - EmplaceTime : TimeSpan.Zero;
-			TimeSpan ChildTrimEnd = WallClockEnd < ChildWallEnd ? WallClockEnd - EmplaceTime : ChildDuration;
+			TimeSpan CutFront = Start > EmplaceTime ? Start - EmplaceTime : TimeSpan.Zero; // how much of the kid falls before Start
+			TimeSpan KeepUntil = (End < ChildWallEnd ? End : ChildWallEnd) - EmplaceTime; // end of what's kept, from the kid's start
 
-			long ChildStart = (long)Math.Round(ChildTrimStart.TotalSeconds * PlaybackManager.BitRate);
-			long ChildEndPos = (long)Math.Round(ChildTrimEnd.TotalSeconds * PlaybackManager.BitRate);
-
-			TimeSpan NewEmplaceTime = EmplaceTime > WallClockStart ? EmplaceTime - WallClockStart : TimeSpan.Zero;
-
-			Child.Trim(ChildStart, ChildEndPos);
-
-			if (Child.MemoryStream.Length == 0 && Child.GetChildren().Count == 0)
-			{
-				Children.RemoveAt(ChildIndex);
-			}
-			else
-			{
-				Children[ChildIndex] = (Child, NewEmplaceTime);
-			}
+			Child.SetTrimWindow(From + CutFront.TotalSeconds, From + KeepUntil.TotalSeconds);
+			Child.TrimKids(CutFront, End - EmplaceTime); // its own kids hang off its start, which just moved by CutFront
+			Children[ChildIndex] = (Child, EmplaceTime > Start ? EmplaceTime - Start : TimeSpan.Zero);
 		}
 	}
 

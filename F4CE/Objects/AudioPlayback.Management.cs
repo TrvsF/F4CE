@@ -40,6 +40,31 @@ internal partial class OAudioPlayback : IDisposable
 		return Clone;
 	}
 
+	// A copy that's fully separate from the original: its own audio, settings and kids, so trimming or
+	// changing the copy never touches the original (the copy constructor above shares the settings).
+	public OAudioPlayback Duplicate()
+	{
+		OAudioPlayback Copy = new()
+		{
+			IsChild = IsChild,
+			PlaybackSettings = PlaybackSettings with { },
+		};
+
+		byte[] AudioData = MemoryStream.ToArray();
+		if (AudioData.Length > 0)
+		{
+			Copy.MemoryStream.Write(AudioData, 0, AudioData.Length);
+			Copy.MemoryStream.Position = 0;
+		}
+
+		foreach (var (Child, EmplaceTime) in Children)
+		{
+			Copy.Children.Add((Child.Duplicate(), EmplaceTime));
+		}
+
+		return Copy;
+	}
+
 	public void Dispose()
 	{
 		Dispose(true);
