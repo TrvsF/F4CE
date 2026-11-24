@@ -199,12 +199,18 @@ internal partial class OAudioPlayback
 				for (int PlaybacksIndex = 0; PlaybacksIndex < PlaybackManager.StoredPlaybacks.Count; PlaybacksIndex++)
 				{
 					bool IsSelected = SelectedIndex == PlaybacksIndex;
-					if (ImGui.Selectable($"{PlaybackManager.StoredPlaybacks[PlaybacksIndex]}", IsSelected))
+					// shows the save's file name; the ## part keeps each entry's ImGui ID unique whatever it's called
+					var StoredPlayback = PlaybackManager.StoredPlaybacks[PlaybacksIndex];
+					if (ImGui.Selectable($"{StoredPlayback}##{StoredPlayback.ImGuiD}", IsSelected))
 					{
 						SelectedIndex = PlaybacksIndex;
 						var Playback = PlaybackManager.StoredPlaybacks[PlaybacksIndex];
 						Console.WriteLine($"{Playback}");
-						AddChild(Playback, new());
+
+						// the kid is a copy of the save, so changing or clearing the kid can't touch the save
+						OAudioPlayback SavedKid = Playback.Duplicate();
+						SavedKid.IsChild = true;
+						AddChild(SavedKid, new());
 					}
 
 					if (IsSelected)
@@ -451,10 +457,9 @@ internal partial class OAudioPlayback
 
 			if (ImGui.Button("save"))
 			{
-				if (!PlaybackManager.StoredPlaybacks.Contains(this))
-				{
-					PlaybackManager.StoredPlaybacks.Add(this);
-				}
+				// saves a copy of how the track is right now in its own file, so clearing or changing the
+				// track afterwards can't touch the save
+				PlaybackManager.SaveCopyOf(this);
 			}
 
 			if (ImGui.Button("export"))

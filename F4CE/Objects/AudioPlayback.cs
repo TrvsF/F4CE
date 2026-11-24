@@ -267,7 +267,6 @@ internal partial class OAudioPlayback
 
 	private TimeSpan GetBaseDuration()
 	{
-		// don't move the stream's position while the recorder is still writing to it
 		if (MemoryStream.Length == 0 || IsRecording)
 		{
 			return TimeSpan.Zero;
@@ -308,16 +307,9 @@ internal partial class OAudioPlayback
 		return Latest;
 	}
 
-	// A top-level playback with its START trimmed keeps its audio where it is on the timeline, lined up with
-	// its kids, by starting it late (the trimmed bit is just silent until T-RIM cuts it). Kids get the same by
-	// moving when their start is trimmed, and a kid window plays as before.
 	private TimeSpan OwnStartDelay => IsChild ? TimeSpan.Zero : TimeSpan.FromSeconds(GetTrimWindow().From);
-
-	// source samples (the units TrimStart/TrimEnd are in) per second of timeline
 	private double TrimUnitsPerSecond => PlaybackManager.BitRate * (double) PlaybackSettings.PlaybackSpeed;
 
-	// The part of this playback's own recording that plays after its START/E.N.D. trim, in seconds of
-	// timeline from the start of the recording, plus the recording's untrimmed length.
 	private (double From, double To, double Length) GetTrimWindow()
 	{
 		double Length = GetBaseDuration().TotalSeconds;
@@ -326,8 +318,6 @@ internal partial class OAudioPlayback
 		return (From, To, Length);
 	}
 
-	// Sets the START/E.N.D. trim from seconds of timeline. The audio itself isn't touched, so a trim can be
-	// dragged back out again later (T-RIM is what actually cuts the audio).
 	private void SetTrimWindow(double From, double To)
 	{
 		double Length = GetBaseDuration().TotalSeconds;
@@ -433,6 +423,13 @@ internal partial class OAudioPlayback
 	public void ReadPlayback(BinaryReader Br)
 	{
 		int AudioLength = Br.ReadInt32();
+
+		long BytesLeft = Br.BaseStream.Length - Br.BaseStream.Position;
+		if (AudioLength < 0 || AudioLength > BytesLeft)
+		{
+			throw new InvalidDataException($"its wave should be {AudioLength} bytes but only {BytesLeft} are left, it's probably cut short");
+		}
+
 		if (AudioLength > 0)
 		{
 			byte[] Audio = Br.ReadBytes(AudioLength);

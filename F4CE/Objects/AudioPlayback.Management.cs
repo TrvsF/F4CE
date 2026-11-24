@@ -12,6 +12,9 @@ internal partial class OAudioPlayback : IDisposable
 {
 	private bool Disposed = false;
 
+	public string SaveFile { get; set; } = null;
+	public string SaveName => SaveFile == null ? null : Path.GetFileNameWithoutExtension(SaveFile);
+
 	public OAudioPlayback() { }
 
 	public OAudioPlayback(OAudioPlayback Source)
@@ -40,8 +43,6 @@ internal partial class OAudioPlayback : IDisposable
 		return Clone;
 	}
 
-	// A copy that's fully separate from the original: its own audio, settings and kids, so trimming or
-	// changing the copy never touches the original (the copy constructor above shares the settings).
 	public OAudioPlayback Duplicate()
 	{
 		OAudioPlayback Copy = new()
@@ -50,7 +51,7 @@ internal partial class OAudioPlayback : IDisposable
 			PlaybackSettings = PlaybackSettings with { },
 		};
 
-		byte[] AudioData = MemoryStream.ToArray();
+		byte[] AudioData = IsRecording ? [] : MemoryStream.ToArray();
 		if (AudioData.Length > 0)
 		{
 			Copy.MemoryStream.Write(AudioData, 0, AudioData.Length);
@@ -59,7 +60,10 @@ internal partial class OAudioPlayback : IDisposable
 
 		foreach (var (Child, EmplaceTime) in Children)
 		{
-			Copy.Children.Add((Child.Duplicate(), EmplaceTime));
+			if (!Child.IsRecording)
+			{
+				Copy.Children.Add((Child.Duplicate(), EmplaceTime));
+			}
 		}
 
 		return Copy;
@@ -107,6 +111,6 @@ internal partial class OAudioPlayback : IDisposable
 
 	public override string ToString()
 	{
-		return ImGuiD.ToString();
+		return SaveName ?? ImGuiD.ToString();
 	}
 }

@@ -82,21 +82,27 @@ internal class Window : GameWindow
 
 	public static void OnClosed()
 	{
-		Console.WriteLine($"Saving!");
-
-		PlaybackManager.SaveListToFile();
-
 		ImguiImplOpenGL3.Shutdown();
 		ImguiImplOpenTK4.Shutdown();
 	}
 
 	private static void DrawPlaybacks()
 	{
+		if (ImGui.Button("open saves folder"))
+		{
+			PlaybackManager.OpenSaveFolder();
+		}
+		ImGui.SameLine();
+		if (ImGui.Button("reload saves"))
+		{
+			PlaybackManager.LoadSavedPlaybacks();
+		}
+
 		for (int PlaybackIndex = PlaybackManager.StoredPlaybacks.Count - 1; PlaybackIndex >= 0; --PlaybackIndex)
 		{
 			var LoadedPlayback = PlaybackManager.StoredPlaybacks[PlaybackIndex];
 			ImGui.PushID($"{LoadedPlayback.ImGuiD}");
-			if (ImGui.Button($"{LoadedPlayback.ImGuiD} {LoadedPlayback.GetTotalDuration()}"))
+			if (ImGui.Button($"{LoadedPlayback} {LoadedPlayback.GetTotalDuration()}"))
 			{
 				if (LoadedPlayback.IsPlaying)
 				{
@@ -110,16 +116,14 @@ internal class Window : GameWindow
 			ImGui.SameLine();
 			if (ImGui.Button("open"))
 			{
-				OAudioPlayback ChildClone = new(LoadedPlayback)
-				{
-					IsChild = true,
-				};
+				OAudioPlayback ChildClone = LoadedPlayback.Duplicate();
+				ChildClone.IsChild = true;
 				PlaybackManager.ActivePlaybacks.Add(ChildClone);
 			}
 			ImGui.SameLine();
 			if (ImGui.Button("delete"))
 			{
-				PlaybackManager.StoredPlaybacks.RemoveAt(PlaybackIndex);
+				PlaybackManager.DeleteSavedPlayback(LoadedPlayback);
 			}
 			ImGui.PopID();
 		}

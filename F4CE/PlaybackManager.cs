@@ -3,6 +3,8 @@ using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -19,73 +21,278 @@ internal class PlaybackManager
 	public static readonly List<OAudioPlayback> ActivePlaybacks = new();
 	public static readonly List<OAudioPlayback> StoredPlaybacks = new();
 
-	private static readonly string SavePath = Path.Combine(AppContext.BaseDirectory, "playbacks.bin");
+	public static readonly string SaveFolder = Path.Combine(AppContext.BaseDirectory, "playbacks");
+	public const string SaveFileExtension = ".f4ce";
+
+	private static readonly string LegacySavePath = Path.Combine(AppContext.BaseDirectory, "playbacks.bin");
 
 	public static void RefreshPlaybacks()
 	{
 		CreateBasePlaybacks();
-		StoredPlaybacks.AddRange(LoadListFromFile(SavePath));
+		ConvertLegacySaveFile();
+		LoadSavedPlaybacks();
 	}
 
 	public static readonly JsonSerializerOptions JsonOptions = new() { IncludeFields = true };
-	private const int SerializationVersion = 1;
+	private const int LegacySerializationVersion = 1;
 
-	public static void SaveListToFile()
+	private static ReadOnlySpan<byte> SaveFileMagic => "F4CE"u8;
+	private const int SaveFileVersion = 1;
+
+	public static void SaveCopyOf(OAudioPlayback Playback)
 	{
-		string? Directory = Path.GetDirectoryName(SavePath);
-		if (!string.IsNullOrEmpty(Directory))
+		OAudioPlayback Saved = Playback.Duplicate();
+		Saved.IsChild = false;
+
+		try
 		{
-			System.IO.Directory.CreateDirectory(Directory);
+			Directory.CreateDirectory(SaveFolder);
+			string SavedAt = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture);
+			string FilePath = MakeUniquePath(SaveFolder, SavedAt, SaveFileExtension);
+
+			WritePlaybackFile(Saved, FilePath);
+			Saved.SaveFile = FilePath;
+			StoredPlaybacks.Add(Saved);
+			Console.WriteLine($"Saved {Path.GetFileName(FilePath)}");
 		}
-
-		using FileStream Fs = new(SavePath, FileMode.Create, FileAccess.Write);
-		using BinaryWriter Bw = new(Fs);
-
-		Bw.Write(SerializationVersion);
-		Bw.Write(StoredPlaybacks.Count);
-
-		foreach (OAudioPlayback Playback in StoredPlaybacks)
+		catch (Exception Ex)
 		{
-			Playback.WritePlayback(Bw);
+			Saved.Dispose();
+			Console.WriteLine($"Couldn't save the playback: {Ex.Message}");
 		}
 	}
 
-	public static List<OAudioPlayback> LoadListFromFile(string FilePath)
+	public static void DeleteSavedPlayback(OAudioPlayback Playback)
 	{
-		if (!File.Exists(FilePath))
+		if (Playback.SaveFile != null)
 		{
-			return [];
+			try
+			{
+				File.Delete(Playback.SaveFile);
+			}
+			catch (Exception Ex)
+			{
+				Console.WriteLine($"Couldn't delete {Path.GetFileName(Playback.SaveFile)}: {Ex.Message}");
+				return;
+			}
 		}
 
-		using FileStream FileStream = new(FilePath, FileMode.Open, FileAccess.Read);
-		using BinaryReader BinaryReader = new(FileStream);
-
-		int Version = BinaryReader.ReadInt32();
-		if (Version != SerializationVersion)
-		{
-			throw new InvalidDataException($"Save file version {Version} is not supported by this build (expected {SerializationVersion}).");
-		}
-
-		int ReadCount = BinaryReader.ReadInt32();
-		List<OAudioPlayback> Result = new(ReadCount);
-
-		for (int ReadIndex = 0; ReadIndex < ReadCount; ++ReadIndex)
-		{
-			Result.Add(ReadPlayback(BinaryReader, IsChild: false));
-		}
-
-		return Result;
+		Playback.StopPlayback();
+		StoredPlaybacks.Remove(Playback);
 	}
 
-	private static OAudioPlayback ReadPlayback(BinaryReader Br, bool IsChild)
+	public static void LoadSavedPlaybacks()
 	{
-		OAudioPlayback Playback = new() 
-		{ 
-			IsChild = IsChild
+		foreach (OAudioPlayback Old in StoredPlaybacks)
+		{
+			Old.StopPlayback();
+		}
+
+		StoredPlaybacks.Clear();
+
+		if (!Directory.Exists(SaveFolder))
+		{
+			return;
+		}
+
+		List<string> Files = Directory.EnumerateFiles(SaveFolder)
+			.Where(FilePath => Path.GetExtension(FilePath).Equals(SaveFileExtension, StringComparison.OrdinalIgnoreCase))
+			.OrderBy(FilePath => Path.GetFileName(FilePath), StringComparer.OrdinalIgnoreCase)
+			.ToList();
+
+		foreach (string FilePath in Files)
+		{
+			try
+			{
+				StoredPlaybacks.Add(ReadPlaybackFile(FilePath));
+			}
+			catch (Exception Ex)
+			{
+				Console.WriteLine($"Skipped {Path.GetFileName(FilePath)}: {Ex.Message}");
+			}
+		}
+
+		Console.WriteLine($"Loaded {StoredPlaybacks.Count} saved playback(s) from {SaveFolder}");
+	}
+
+	public static void OpenSaveFolder()
+	{
+		try
+		{
+			Directory.CreateDirectory(SaveFolder);
+			Process.Start(new ProcessStartInfo { FileName = SaveFolder, UseShellExecute = true });
+		}
+		catch (Exception Ex)
+		{
+			Console.WriteLine($"Couldn't open {SaveFolder}: {Ex.Message}");
+		}
+	}
+
+	public static void ConvertLegacySaveFile()
+	{
+		if (!File.Exists(LegacySavePath))
+		{
+			return;
+		}
+
+		string LegacyName = Path.GetFileName(LegacySavePath);
+		Console.WriteLine($"Converting {LegacyName} into separate playback files...");
+
+		string NamePrefix = File.GetLastWriteTime(LegacySavePath).ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture) + "_legacy-";
+		int Converted = 0;
+		bool AllConverted = true;
+
+		try
+		{
+			Directory.CreateDirectory(SaveFolder);
+
+			using FileStream Fs = new(LegacySavePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+			using BinaryReader Br = new(Fs);
+
+			int Version = Br.ReadInt32();
+			if (Version != LegacySerializationVersion)
+			{
+				throw new InvalidDataException($"it's version {Version}, expected {LegacySerializationVersion}");
+			}
+
+			int Count = Br.ReadInt32();
+			if (Count < 0)
+			{
+				throw new InvalidDataException($"it says it holds {Count} playbacks");
+			}
+
+			int Digits = Math.Max(2, Count.ToString(CultureInfo.InvariantCulture).Length);
+
+			for (int Index = 0; Index < Count; ++Index)
+			{
+				using OAudioPlayback Playback = new()
+				{
+					IsChild = false,
+				};
+				Playback.ReadPlayback(Br);
+
+				string Number = (Index + 1).ToString(CultureInfo.InvariantCulture).PadLeft(Digits, '0');
+				string FilePath = Path.Combine(SaveFolder, NamePrefix + Number + SaveFileExtension);
+
+				if (File.Exists(FilePath))
+				{
+					continue;
+				}
+
+				try
+				{
+					WritePlaybackFile(Playback, FilePath);
+					++Converted;
+				}
+				catch (Exception Ex)
+				{
+					AllConverted = false;
+					Console.WriteLine($"Couldn't write {Path.GetFileName(FilePath)}: {Ex.Message}");
+				}
+			}
+		}
+		catch (Exception Ex)
+		{
+			AllConverted = false;
+			Console.WriteLine($"Couldn't convert all of {LegacyName}: {Ex.Message}");
+		}
+
+		if (!AllConverted)
+		{
+			Console.WriteLine($"Left {LegacyName} where it is, converting it will be tried again next time F4CE starts");
+			return;
+		}
+
+		try
+		{
+			string BackupPath = MakeUniquePath(Path.GetDirectoryName(LegacySavePath), LegacyName, ".old");
+			File.Move(LegacySavePath, BackupPath);
+			Console.WriteLine($"Converted {Converted} playback(s), the old file is now {Path.GetFileName(BackupPath)}");
+		}
+		catch (Exception Ex)
+		{
+			Console.WriteLine($"Converted {Converted} playback(s) but couldn't rename {LegacyName}: {Ex.Message}");
+		}
+	}
+
+	private static void WritePlaybackFile(OAudioPlayback Playback, string FilePath)
+	{
+		string TempPath = FilePath + ".tmp";
+
+		try
+		{
+			using (FileStream Fs = new(TempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+			using (BinaryWriter Bw = new(Fs))
+			{
+				Bw.Write(SaveFileMagic);
+				Bw.Write(SaveFileVersion);
+				Playback.WritePlayback(Bw);
+				Bw.Flush();
+				Fs.Flush(flushToDisk: true);
+			}
+
+			File.Move(TempPath, FilePath);
+		}
+		catch
+		{
+			try
+			{
+				File.Delete(TempPath);
+			}
+			catch
+			{
+				// the error that matters is the one being rethrown
+			}
+
+			throw;
+		}
+	}
+
+	private static OAudioPlayback ReadPlaybackFile(string FilePath)
+	{
+		using FileStream Fs = new(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+		using BinaryReader Br = new(Fs);
+
+		if (!Br.ReadBytes(SaveFileMagic.Length).AsSpan().SequenceEqual(SaveFileMagic))
+		{
+			throw new InvalidDataException("it isn't an F4CE playback file");
+		}
+
+		int Version = Br.ReadInt32();
+		if (Version != SaveFileVersion)
+		{
+			throw new InvalidDataException($"it's file format version {Version}, this F4CE reads version {SaveFileVersion}");
+		}
+
+		OAudioPlayback Playback = new()
+		{
+			IsChild = false,
 		};
-		
-		Playback.ReadPlayback(Br);		
+
+		try
+		{
+			Playback.ReadPlayback(Br);
+		}
+		catch
+		{
+			Playback.Dispose();
+			throw;
+		}
+
+		Playback.SaveFile = FilePath;
 		return Playback;
+	}
+
+	private static string MakeUniquePath(string Folder, string Name, string Extension)
+	{
+		string FilePath = Path.Combine(Folder, Name + Extension);
+
+		for (int Number = 2; File.Exists(FilePath); ++Number)
+		{
+			FilePath = Path.Combine(Folder, $"{Name}_{Number}{Extension}");
+		}
+
+		return FilePath;
 	}
 
 	public static void AddPlayback(OAudioPlayback AudioPlayback)
